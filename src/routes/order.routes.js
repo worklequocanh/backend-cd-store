@@ -104,8 +104,23 @@ router.get('/:id', verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id).populate('items.productId');
 
-    if (!order || order.userId.toString() !== req.user.id) {
+    if (!order || (order.userId.toString() !== req.user.id && req.user.role !== 'admin')) {
       return sendError(res, 'Order not found or access denied', 404);
+    }
+
+    // Proactively check PayOS status if still pending
+    if (order.paymentMethod === 'qr' && order.paymentStatus === 'pending' && order.payosOrderCode) {
+      try {
+        const payos = getPayOS();
+        const paymentInfo = await payos.getPaymentLinkInformation(order.payosOrderCode);
+        if (paymentInfo && paymentInfo.status === 'PAID') {
+          order.paymentStatus = 'completed';
+          order.orderStatus = 'confirmed';
+          await order.save();
+        }
+      } catch (err) {
+        console.error('Failed to sync PayOS status:', err.message);
+      }
     }
 
     return sendSuccess(res, order);
