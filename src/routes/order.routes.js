@@ -36,7 +36,7 @@ router.post('/', verifyToken, async (req, res) => {
       };
     });
 
-    const shippingFee = subtotal > 500000 ? 0 : 25000;
+    const shippingFee = subtotal > 500000 ? 0 : 250;
     const total = subtotal + shippingFee - (cart.discountAmount || 0);
 
     const order = new Order({
