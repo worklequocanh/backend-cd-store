@@ -5,7 +5,7 @@ export const sendEmail = async ({ to, subject, html }) => {
     // We only create transporter if environment variables are provided
     if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
       console.warn('Mail config missing. Skipping email send to:', to);
-      return false;
+      return { success: false, error: 'Mail config missing (SMTP_HOST, SMTP_USER, or SMTP_PASS)' };
     }
 
     const transporter = nodemailer.createTransport({
@@ -18,19 +18,17 @@ export const sendEmail = async ({ to, subject, html }) => {
       },
     });
 
-    const info = await transporter.sendMail({
+    const mailOptions = {
       from: `"CD Store" <${process.env.SMTP_USER}>`,
       to,
       subject,
       html,
-    });
+    };
 
-    console.log('Message sent: %s', info.messageId);
-    return true;
+    await transporter.sendMail(mailOptions);
+    return { success: true };
   } catch (error) {
     console.error('Error sending email:', error);
-    return false;
+    return { success: false, error: error.message };
   }
 };
-
-
