@@ -126,6 +126,22 @@ router.patch('/:id/status', verifyToken, async (req, res) => {
     order.orderStatus = status;
     await order.save();
 
+    const user = await User.findById(order.userId);
+    if (user && user.email) {
+      sendEmail({
+        to: user.email,
+        subject: `Update on your Order #${order.orderNumber}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #3b82f6;">Order Status Updated</h2>
+            <p>Hi ${user.name},</p>
+            <p>Your order <strong>#${order.orderNumber}</strong> has been updated to: <strong style="text-transform: uppercase;">${status}</strong>.</p>
+            <p>Thank you for shopping with CD Store!</p>
+          </div>
+        `
+      });
+    }
+
     return sendSuccess(res, order, 'Order status updated');
   } catch (error) {
     return sendError(res, 'Failed to update order status', 500);

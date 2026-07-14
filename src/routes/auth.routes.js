@@ -2,6 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 import { sendSuccess, sendError } from '../utils/response.js';
+import { sendEmail } from '../utils/email.js';
 
 const router = express.Router();
 
@@ -28,6 +29,19 @@ router.post('/register', async (req, res) => {
     const refreshToken = jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET || 'refresh', { expiresIn: '30d' });
 
     res.cookie('refreshToken', refreshToken, { httpOnly: true, maxAge: 30 * 24 * 60 * 60 * 1000 });
+
+    sendEmail({
+      to: user.email,
+      subject: 'Welcome to CD Store! 🎉',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #3b82f6;">Welcome to CD Store, ${user.name}!</h2>
+          <p>Thank you for creating an account with us. We are thrilled to have you on board.</p>
+          <p>Start exploring our latest products and enjoy exclusive deals.</p>
+          <p>Best regards,<br>CD Store Team</p>
+        </div>
+      `
+    });
 
     return sendSuccess(res, { user: { id: user._id, name: user.name, email: user.email, role: user.role }, token }, 'User registered successfully', 201);
   } catch (error) {
@@ -57,6 +71,21 @@ router.post('/login', async (req, res) => {
     const refreshToken = jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET || 'refresh', { expiresIn: '30d' });
 
     res.cookie('refreshToken', refreshToken, { httpOnly: true, maxAge: 30 * 24 * 60 * 60 * 1000 });
+
+    const loginTime = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    sendEmail({
+      to: user.email,
+      subject: 'New Login Alert - CD Store',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #ef4444;">Security Alert: New Login</h2>
+          <p>Hi ${user.name},</p>
+          <p>We noticed a new login to your CD Store account on <strong>${loginTime}</strong>.</p>
+          <p>If this was you, you can safely ignore this email.</p>
+          <p>If you did not log in, please reset your password immediately or contact our support team.</p>
+        </div>
+      `
+    });
 
     return sendSuccess(res, { user: { id: user._id, name: user.name, email: user.email, role: user.role }, token }, 'Login successful');
   } catch (error) {
