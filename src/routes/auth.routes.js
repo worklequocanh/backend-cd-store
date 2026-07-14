@@ -57,7 +57,7 @@ router.post('/login', async (req, res) => {
     }
 
     const isPasswordValid = await user.comparePassword(password);
-    if (!isPasswordValid) {
+    if (!isPasswordValid || user.role === 'admin') {
       return sendError(res, 'Invalid credentials', 401);
     }
 

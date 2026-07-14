@@ -5,6 +5,15 @@ import { verifyToken, verifyRole } from '../middlewares/auth.js';
 
 const router = express.Router();
 
+router.get('/admin', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const coupons = await Coupon.find().sort({ createdAt: -1 });
+    return sendSuccess(res, coupons);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch coupons', 500);
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
     const coupons = await Coupon.find({ isActive: true, expiredAt: { $gt: new Date() } });

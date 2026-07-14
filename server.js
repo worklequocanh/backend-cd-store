@@ -16,6 +16,7 @@ import orderRoutes from './src/routes/order.routes.js';
 import couponRoutes from './src/routes/coupon.routes.js';
 import reviewRoutes from './src/routes/review.routes.js';
 import adminRoutes from './src/routes/admin.routes.js';
+import adminAuthRoutes from './src/routes/adminAuth.routes.js';
 import uploadRoutes from './src/routes/upload.routes.js';
 
 dotenv.config();
@@ -42,6 +43,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'cd-store-ap
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/admin/auth', adminAuthRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/products', productRoutes);

@@ -54,7 +54,7 @@ export const getWelcomeEmail = (name) => {
     <p style="font-size: 16px; line-height: 1.6;">We are absolutely thrilled to have you on board! Your account has been successfully created.</p>
     <p style="font-size: 16px; line-height: 1.6;">Get ready to explore our exclusive collection of CDs and enjoy a premium shopping experience.</p>
     <div style="text-align: center; margin: 35px 0;">
-      <a href="https://frontend-cd-store.vercel.app/" style="background-color: ${brandColor}; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">Start Shopping Now</a>
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/shop" style="background-color: ${brandColor}; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">Start Shopping Now</a>
     </div>
     <p style="font-size: 16px; line-height: 1.6; margin-bottom: 0;">Best regards,<br>The ${brandName} Team</p>
   `;
@@ -148,7 +148,7 @@ export const getOrderStatusEmail = (order, user) => {
 
     <p style="font-size: 16px; line-height: 1.6;">You can track your order details anytime by logging into your account.</p>
     <div style="text-align: center; margin: 30px 0 10px;">
-      <a href="https://frontend-cd-store.vercel.app/orders/${order._id}" style="background-color: #0f172a; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block;">View Order Details</a>
+      <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/orders/${order._id}" style="background-color: #0f172a; color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block;">View Order Details</a>
     </div>
   `;
   return baseTemplate(`Update on Order #${order.orderNumber}`, content);

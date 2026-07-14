@@ -35,10 +35,11 @@ router.get('/dashboard', verifyToken, verifyRole(['admin']), async (req, res) =>
     const totalOrders = await Order.countDocuments();
     const totalUsers = await User.countDocuments();
     const totalProducts = await Product.countDocuments();
-    const totalRevenue = (await Order.aggregate([
+    const revenueAgg = await Order.aggregate([
       { $match: { orderStatus: { $ne: 'cancelled' } } },
       { $group: { _id: null, total: { $sum: '$total' } } }
-    ])[0]) || { total: 0 };
+    ]);
+    const totalRevenue = revenueAgg[0] || { total: 0 };
     const pendingOrders = await Order.countDocuments({ orderStatus: 'pending' });
 
     const recentOrders = await Order.find().sort({ createdAt: -1 }).limit(5).populate('userId', 'name email');

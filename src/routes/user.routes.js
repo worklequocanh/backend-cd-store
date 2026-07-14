@@ -60,6 +60,29 @@ router.patch('/:id', verifyToken, async (req, res) => {
   }
 });
 
+router.patch('/:id/role', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!['user', 'admin'].includes(role)) {
+      return sendError(res, 'Invalid role', 400);
+    }
+    
+    // Prevent self-demotion
+    if (req.user.id === req.params.id && role === 'user') {
+      return sendError(res, 'You cannot demote yourself', 400);
+    }
+
+    const user = await User.findByIdAndUpdate(req.params.id, { role }, { new: true }).select('-passwordHash');
+    if (!user) {
+      return sendError(res, 'User not found', 404);
+    }
+
+    return sendSuccess(res, user, 'User role updated');
+  } catch (error) {
+    return sendError(res, 'Failed to update user role', 500);
+  }
+});
+
 router.delete('/:id', verifyToken, verifyRole(['admin']), async (req, res) => {
   try {
     const user = await User.findByIdAndDelete(req.params.id);
