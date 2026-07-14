@@ -250,6 +250,10 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
       return sendError(res, 'Order is already paid or cancelled', 400);
     }
 
+    if (order.payosCheckoutUrl) {
+      return sendSuccess(res, { checkoutUrl: order.payosCheckoutUrl }, 'Payment link retrieved');
+    }
+
     if (!order.payosOrderCode) {
       order.payosOrderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
       await order.save();
@@ -271,6 +275,9 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
     };
 
     const paymentLinkRes = await payos.createPaymentLink(body);
+    order.payosCheckoutUrl = paymentLinkRes.checkoutUrl;
+    await order.save();
+    
     return sendSuccess(res, { checkoutUrl: paymentLinkRes.checkoutUrl }, 'Payment link created');
   } catch (error) {
     console.error('PayOS Link Error:', error);

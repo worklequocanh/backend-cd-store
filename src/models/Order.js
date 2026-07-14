@@ -4,6 +4,7 @@ const orderSchema = new mongoose.Schema(
   {
     orderNumber: { type: String, unique: true, required: true },
     payosOrderCode: { type: Number, unique: true, sparse: true },
+    payosCheckoutUrl: { type: String },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     items: [
       {
