@@ -9,6 +9,27 @@ import { sendEmail } from '../utils/email.js';
 
 const router = express.Router();
 
+router.post('/test-email', async (req, res) => {
+  try {
+    const { to } = req.body;
+    if (!to) return sendError(res, 'Missing "to" email address', 400);
+
+    const result = await sendEmail({
+      to,
+      subject: 'Test SMTP Config',
+      html: '<p>This is a test email to verify SMTP configuration on Render.</p>'
+    });
+
+    if (result) {
+      return sendSuccess(res, { success: true }, 'Test email sent successfully');
+    } else {
+      return sendError(res, 'Failed to send test email. Check server logs for details.', 500);
+    }
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+});
+
 router.get('/dashboard', verifyToken, verifyRole(['admin']), async (req, res) => {
   try {
     const totalOrders = await Order.countDocuments();
