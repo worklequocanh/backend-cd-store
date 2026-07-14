@@ -5,7 +5,8 @@ import Product from '../models/Product.js';
 import User from '../models/User.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken } from '../middlewares/auth.js';
-import { sendEmail, getOrderConfirmationEmailTemplate } from '../utils/email.js';
+import { sendEmail } from '../utils/email.js';
+import { getOrderStatusEmail } from '../utils/emailTemplates.js';
 import { getPayOS } from '../config/payos.js';
 
 const router = express.Router();
@@ -63,8 +64,8 @@ router.post('/', verifyToken, async (req, res) => {
       if (user && user.email) {
         sendEmail({
           to: user.email,
-          subject: `Order Confirmation #${order.orderNumber}`,
-          html: getOrderConfirmationEmailTemplate(order, user)
+          subject: `Order Status Update - #${order.orderNumber}`,
+          html: getOrderStatusEmail(order, user)
         });
       }
     }).catch(err => console.error('Failed to get user for email:', err));

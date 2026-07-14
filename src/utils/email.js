@@ -33,22 +33,4 @@ export const sendEmail = async ({ to, subject, html }) => {
   }
 };
 
-export const getOrderConfirmationEmailTemplate = (order, user) => {
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #3b82f6;">Order Confirmation</h2>
-      <p>Hello ${user.name},</p>
-      <p>Thank you for your order! We've received your order <strong>#${order.orderNumber}</strong> and are getting it ready.</p>
-      
-      <div style="background-color: #f9fafb; padding: 15px; border-radius: 5px; margin: 20px 0;">
-        <h3 style="margin-top: 0;">Order Summary</h3>
-        <p><strong>Total:</strong> $${order.total}</p>
-        <p><strong>Payment Method:</strong> ${order.paymentMethod.toUpperCase()}</p>
-        <p><strong>Status:</strong> ${order.paymentStatus.toUpperCase()}</p>
-      </div>
 
-      <p>We'll notify you when it ships.</p>
-      <p>Best regards,<br>CD Store Team</p>
-    </div>
-  `;
-};
