@@ -1,4 +1,5 @@
-import PayOS from '@payos/node';
+import PayOSLib from '@payos/node';
+const PayOS = PayOSLib.PayOS || PayOSLib;
 
 let payosInstance = null;
 
