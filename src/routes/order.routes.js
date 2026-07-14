@@ -260,7 +260,7 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
     }
 
     const payos = getPayOS();
-    const clientUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const clientUrl = req.headers.origin || process.env.FRONTEND_URL || 'https://frontend-cd-store.vercel.app';
     const body = {
       orderCode: order.payosOrderCode,
       amount: Math.round(order.total),
