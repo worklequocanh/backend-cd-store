@@ -11,6 +11,8 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ['user', 'admin'], default: 'user' },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     avatar: { type: String },
+    resetPasswordOtp: { type: String },
+    resetPasswordExpires: { type: Date },
     wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
   },
   { timestamps: true }

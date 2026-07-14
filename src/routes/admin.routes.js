@@ -5,6 +5,7 @@ import Product from '../models/Product.js';
 import Review from '../models/Review.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken, verifyRole } from '../middlewares/auth.js';
+import { sendEmail } from '../utils/email.js';
 
 const router = express.Router();
 
@@ -56,10 +57,18 @@ router.get('/orders', verifyToken, verifyRole(['admin']), async (req, res) => {
 router.patch('/orders/:id/status', verifyToken, verifyRole(['admin']), async (req, res) => {
   try {
     const { status } = req.body;
-    const order = await Order.findByIdAndUpdate(req.params.id, { orderStatus: status }, { new: true });
+    const order = await Order.findByIdAndUpdate(req.params.id, { orderStatus: status }, { new: true }).populate('userId', 'name email');
 
     if (!order) {
       return sendError(res, 'Order not found', 404);
+    }
+
+    if (order.userId && order.userId.email) {
+      sendEmail({
+        to: order.userId.email,
+        subject: `Order Update #${order.orderNumber}: ${status.toUpperCase()}`,
+        html: `<p>Hi ${order.userId.name},</p><p>Your order <strong>#${order.orderNumber}</strong> has been updated to: <strong>${status.toUpperCase()}</strong>.</p><p>Thank you for shopping with CD Store!</p>`
+      });
     }
 
     return sendSuccess(res, order, 'Order status updated');

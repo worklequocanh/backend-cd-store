@@ -194,6 +194,7 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
     }
 
     const payos = getPayOS();
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const body = {
       orderCode: order.payosOrderCode,
       amount: order.total,
@@ -203,8 +204,8 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
         quantity: item.quantity,
         price: item.price
       })),
-      returnUrl: `http://localhost:3000/orders/${order._id}?payos=success`,
-      cancelUrl: `http://localhost:3000/orders/${order._id}?payos=cancel`
+      returnUrl: `${clientUrl}/orders/${order._id}?payos=success`,
+      cancelUrl: `${clientUrl}/orders/${order._id}?payos=cancel`
     };
 
     const paymentLinkRes = await payos.createPaymentLink(body);

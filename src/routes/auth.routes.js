@@ -106,4 +106,59 @@ router.post('/logout', (req, res) => {
   return sendSuccess(res, null, 'Logged out successfully');
 });
 
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) return sendError(res, 'User not found', 404);
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    user.resetPasswordOtp = otp;
+    user.resetPasswordExpires = Date.now() + 5 * 60 * 1000; // 5 mins
+    await user.save();
+
+    const { sendEmail } = await import('../utils/email.js');
+    sendEmail({
+      to: user.email,
+      subject: 'Password Reset OTP',
+      html: `<p>Your password reset OTP is <strong>${otp}</strong>.</p><p>It will expire in 5 minutes.</p>`
+    });
+
+    return sendSuccess(res, null, 'OTP sent to email');
+  } catch (error) {
+    return sendError(res, 'Internal server error', 500);
+  }
+});
+
+router.post('/verify-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    const user = await User.findOne({ email, resetPasswordOtp: otp, resetPasswordExpires: { $gt: Date.now() } });
+    if (!user) return sendError(res, 'Invalid or expired OTP', 400);
+
+    return sendSuccess(res, { verifiedToken: otp }, 'OTP verified');
+  } catch (error) {
+    return sendError(res, 'Internal server error', 500);
+  }
+});
+
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (newPassword.length < 6) return sendError(res, 'Password must be at least 6 characters long', 400);
+
+    const user = await User.findOne({ email, resetPasswordOtp: otp, resetPasswordExpires: { $gt: Date.now() } });
+    if (!user) return sendError(res, 'Invalid or expired OTP', 400);
+
+    user.passwordHash = newPassword;
+    user.resetPasswordOtp = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    return sendSuccess(res, null, 'Password reset successful');
+  } catch (error) {
+    return sendError(res, 'Internal server error', 500);
+  }
+});
+
 export default router;

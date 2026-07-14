@@ -2,6 +2,7 @@ import express from 'express';
 import User from '../models/User.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken, verifyRole } from '../middlewares/auth.js';
+import { sendEmail } from '../utils/email.js';
 
 const router = express.Router();
 
@@ -45,6 +46,12 @@ router.patch('/:id', verifyToken, async (req, res) => {
     if (!user) {
       return sendError(res, 'User not found', 404);
     }
+
+    sendEmail({
+      to: user.email,
+      subject: 'Security Alert: Your Profile Was Updated',
+      html: `<p>Hi ${user.name},</p><p>Your profile information (name, phone, address, or avatar) has been updated successfully.</p><p>If you did not make this change, please contact support immediately or change your password.</p>`
+    });
 
     return sendSuccess(res, user, 'User updated');
   } catch (error) {
