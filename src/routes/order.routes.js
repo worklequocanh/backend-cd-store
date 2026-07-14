@@ -197,12 +197,12 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const body = {
       orderCode: order.payosOrderCode,
-      amount: order.total,
+      amount: Math.round(order.total),
       description: `Thanh toan don ${order.orderNumber}`.substring(0, 25),
       items: order.items.map(item => ({
         name: item.name,
         quantity: item.quantity,
-        price: item.price
+        price: Math.round(item.price)
       })),
       returnUrl: `${clientUrl}/orders/${order._id}?payos=success`,
       cancelUrl: `${clientUrl}/orders/${order._id}?payos=cancel`
@@ -212,7 +212,7 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
     return sendSuccess(res, { checkoutUrl: paymentLinkRes.checkoutUrl }, 'Payment link created');
   } catch (error) {
     console.error('PayOS Link Error:', error);
-    return sendError(res, 'Failed to create payment link', 500);
+    return sendError(res, error.message || 'Failed to create payment link', 500);
   }
 });
 
