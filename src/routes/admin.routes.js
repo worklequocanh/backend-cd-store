@@ -9,10 +9,10 @@ import { sendEmail } from '../utils/email.js';
 
 const router = express.Router();
 
-router.post('/test-email', async (req, res) => {
+router.get('/test-email', async (req, res) => {
   try {
-    const { to } = req.body;
-    if (!to) return sendError(res, 'Missing "to" email address', 400);
+    const to = req.query.to;
+    if (!to) return sendError(res, 'Missing "to" query parameter. Example: ?to=your@email.com', 400);
 
     const result = await sendEmail({
       to,
