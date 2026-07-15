@@ -1,9 +1,29 @@
 import express from 'express';
 import Review from '../models/Review.js';
 import { sendSuccess, sendError } from '../utils/response.js';
-import { verifyToken } from '../middlewares/auth.js';
+import { verifyToken, verifyRole } from '../middlewares/auth.js';
 
 const router = express.Router();
+
+router.get('/admin/all', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const reviews = await Review.find().populate('userId', 'name email').populate('productId', 'name slug').sort({ createdAt: -1 });
+    return sendSuccess(res, reviews);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch all reviews', 500);
+  }
+});
+
+router.patch('/admin/:id/status', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { isApproved } = req.body;
+    const review = await Review.findByIdAndUpdate(req.params.id, { isApproved }, { new: true });
+    if (!review) return sendError(res, 'Review not found', 404);
+    return sendSuccess(res, review, 'Review status updated');
+  } catch (error) {
+    return sendError(res, 'Failed to update review status', 500);
+  }
+});
 
 router.post('/', verifyToken, async (req, res) => {
   try {

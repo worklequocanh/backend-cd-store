@@ -3,11 +3,12 @@ import Order from '../models/Order.js';
 import Cart from '../models/Cart.js';
 import Product from '../models/Product.js';
 import User from '../models/User.js';
+import Coupon from '../models/Coupon.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken } from '../middlewares/auth.js';
 import { sendEmail } from '../utils/email.js';
 import { getOrderStatusEmail } from '../utils/emailTemplates.js';
-import { getPayOS } from '../config/payos.js';
+import { getSePay } from '../config/sepay.js';
 
 const router = express.Router();
 
@@ -38,7 +39,8 @@ router.post('/', verifyToken, async (req, res) => {
     });
 
     const shippingFee = subtotal > 500000 ? 0 : 250;
-    const total = subtotal + shippingFee - (cart.discountAmount || 0);
+    const discountAmount = cart.discountAmount || 0;
+    const total = Math.max(0, subtotal + shippingFee - discountAmount);
 
     const order = new Order({
       userId: req.user.id,
@@ -48,11 +50,19 @@ router.post('/', verifyToken, async (req, res) => {
       paymentStatus: 'pending',
       subtotal,
       shippingFee,
-      discountAmount: cart.discountAmount || 0,
+      discountAmount,
+      couponCode: cart.couponCode || null,
       total,
     });
 
     await order.save();
+
+    if (cart.couponCode) {
+      await Coupon.findOneAndUpdate(
+        { code: cart.couponCode },
+        { $inc: { usedCount: 1 }, $addToSet: { usedBy: req.user.id } }
+      );
+    }
 
     cart.items = [];
     cart.couponCode = null;
@@ -109,18 +119,20 @@ router.get('/:id', verifyToken, async (req, res) => {
       return sendError(res, 'Order not found or access denied', 404);
     }
 
-    // Proactively check PayOS status if still pending
+    // Proactively check status if still pending (or handle via SePay return)
     if (order.paymentMethod === 'qr' && order.paymentStatus === 'pending' && order.payosOrderCode) {
       try {
-        const payos = getPayOS();
-        const paymentInfo = await payos.getPaymentLinkInformation(order.payosOrderCode);
-        if (paymentInfo && paymentInfo.status === 'PAID') {
-          order.paymentStatus = 'completed';
-          order.orderStatus = 'confirmed';
-          await order.save();
+        const sepay = getSePay();
+        if (sepay.order && typeof sepay.order.retrieve === 'function') {
+          const orderInfo = await sepay.order.retrieve(order.orderNumber);
+          if (orderInfo && (orderInfo.status === 'PAID' || orderInfo.payment_status === 'COMPLETED')) {
+            order.paymentStatus = 'completed';
+            order.orderStatus = 'confirmed';
+            await order.save();
+          }
         }
       } catch (err) {
-        console.error('Failed to sync PayOS status:', err.message);
+        console.error('Failed to sync SePay status:', err.message);
       }
     }
 
@@ -256,7 +268,7 @@ router.post('/:id/mock-pay', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
+router.post('/:id/create-sepay-link', verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id).populate('items.productId');
     if (!order || order.userId.toString() !== req.user.id) {
@@ -266,64 +278,70 @@ router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
       return sendError(res, 'Order is already paid or cancelled', 400);
     }
 
-    if (order.payosCheckoutUrl) {
-      return sendSuccess(res, { checkoutUrl: order.payosCheckoutUrl }, 'Payment link retrieved');
-    }
-
-    if (!order.payosOrderCode) {
-      order.payosOrderCode = Number(String(Date.now()).slice(-6) + Math.floor(Math.random() * 1000));
-      await order.save();
-    }
-
-    const payos = getPayOS();
-    const clientUrl = req.headers.origin || process.env.FRONTEND_URL || 'https://frontend-cd-store.vercel.app';
-    const body = {
-      orderCode: order.payosOrderCode,
-      amount: Math.round(order.total),
-      description: `Thanh toan don ${order.orderNumber}`.substring(0, 25),
-      items: order.items.map(item => ({
-        name: item.name,
-        quantity: item.quantity,
-        price: Math.round(item.price)
-      })),
-      returnUrl: `${clientUrl}/orders/${order._id}?payos=success`,
-      cancelUrl: `${clientUrl}/orders/${order._id}?payos=cancel`
-    };
-
-    const paymentLinkRes = await payos.createPaymentLink(body);
-    order.payosCheckoutUrl = paymentLinkRes.checkoutUrl;
-    await order.save();
+    const sepay = getSePay();
+    const clientUrl = req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173';
     
-    return sendSuccess(res, { checkoutUrl: paymentLinkRes.checkoutUrl }, 'Payment link created');
+    const checkoutURL = sepay.checkout.initCheckoutUrl();
+    const checkoutFormfields = sepay.checkout.initOneTimePaymentFields({
+      payment_method: 'BANK_TRANSFER',
+      order_invoice_number: order.orderNumber,
+      order_amount: Math.round(order.total),
+      currency: 'VND',
+      order_description: `Thanh toan don hang ${order.orderNumber}`.substring(0, 50),
+      success_url: `${clientUrl}/orders/${order._id}?sepay=success`,
+      error_url: `${clientUrl}/orders/${order._id}?sepay=error`,
+      cancel_url: `${clientUrl}/orders/${order._id}?sepay=cancel`,
+    });
+
+    return sendSuccess(res, {
+      checkoutUrl: checkoutURL,
+      formFields: checkoutFormfields
+    }, 'SePay checkout form generated');
   } catch (error) {
-    console.error('PayOS Link Error:', error);
-    return sendError(res, error.message || 'Failed to create payment link', 500);
+    console.error('SePay Link Error:', error);
+    return sendError(res, error.message || 'Failed to create SePay checkout form', 500);
   }
 });
 
-router.post('/payos/webhook', async (req, res) => {
-  try {
-    const payos = getPayOS();
-    const webhookData = payos.verifyPaymentWebhookData(req.body);
+// Alias for compatibility
+router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
+  req.url = `/${req.params.id}/create-sepay-link`;
+  return router.handle(req, res);
+});
 
-    if (webhookData.code === '00' && webhookData.success) {
-      const order = await Order.findOne({ payosOrderCode: webhookData.data.orderCode });
+router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res) => {
+  try {
+    console.log('Received SePay IPN Notification:', req.body);
+    const body = req.body || {};
+    
+    // Extract order number/invoice from SePay notification
+    const invoiceNumber = body.order_invoice_number || body.invoice_number || body.orderCode || body.content;
+    const isSuccess = body.status === 'SUCCESS' || body.status === 'COMPLETED' || body.status === 'PAID' || body.success === true || body.code === '00' || (body.amount_in && Number(body.amount_in) > 0);
+
+    if (invoiceNumber && isSuccess) {
+      const order = await Order.findOne({ 
+        $or: [
+          { orderNumber: invoiceNumber },
+          { payosOrderCode: invoiceNumber }
+        ]
+      });
       if (order && order.paymentStatus === 'pending') {
         order.paymentStatus = 'completed';
         order.orderStatus = 'confirmed';
         await order.save();
+        console.log(`Order #${order.orderNumber} updated to paid via IPN`);
       }
     }
     
-    res.json({
+    res.status(200).json({
       success: true,
-      message: 'Webhook received successfully'
+      message: 'IPN received successfully'
     });
   } catch (error) {
-    console.error('PayOS Webhook Error:', error);
-    res.json({
+    console.error('SePay IPN Error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Webhook error'
+      message: 'IPN error'
     });
   }
 });

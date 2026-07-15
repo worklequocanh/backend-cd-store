@@ -2,9 +2,9 @@ import express from 'express';
 import Cart from '../models/Cart.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken } from '../middlewares/auth.js';
+import Coupon from '../models/Coupon.js';
 
 const router = express.Router();
-
 import mongoose from 'mongoose';
 
 const calculateTotals = async (cart) => {
@@ -28,8 +28,75 @@ const calculateTotals = async (cart) => {
   
   cart.items = validItems;
   cart.subtotal = subtotal;
-  cart.total = subtotal - (cart.discountAmount || 0);
+
+  if (cart.couponCode) {
+    const CouponModel = mongoose.model('Coupon');
+    const coupon = await CouponModel.findOne({ code: cart.couponCode, isActive: true, expiredAt: { $gt: new Date() } });
+    if (!coupon || (coupon.minOrderValue && subtotal < coupon.minOrderValue)) {
+      cart.couponCode = null;
+      cart.discountAmount = 0;
+    } else {
+      const discount = coupon.type === 'percent' ? (subtotal * coupon.value) / 100 : coupon.value;
+      const finalDiscount = coupon.maxDiscount ? Math.min(discount, coupon.maxDiscount) : discount;
+      cart.discountAmount = finalDiscount;
+    }
+  } else {
+    cart.discountAmount = 0;
+  }
+
+  cart.total = Math.max(0, subtotal - (cart.discountAmount || 0));
 };
+
+router.post('/apply-coupon', verifyToken, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) return sendError(res, 'Coupon code is required', 400);
+
+    const cart = await Cart.findOne({ userId: req.user.id }).populate('items.productId');
+    if (!cart || cart.items.length === 0) {
+      return sendError(res, 'Your cart is empty', 400);
+    }
+
+    const CouponModel = mongoose.model('Coupon');
+    const coupon = await CouponModel.findOne({ code: code.toUpperCase(), isActive: true, expiredAt: { $gt: new Date() } });
+
+    if (!coupon) {
+      return sendError(res, 'Invalid or expired coupon code', 400);
+    }
+
+    if (coupon.minOrderValue && cart.subtotal < coupon.minOrderValue) {
+      return sendError(res, `Minimum order value for this coupon is $${coupon.minOrderValue}`, 400);
+    }
+
+    if (coupon.maxUsage && coupon.usedCount >= coupon.maxUsage) {
+      return sendError(res, 'Coupon usage limit has been reached', 400);
+    }
+
+    cart.couponCode = coupon.code;
+    await calculateTotals(cart);
+    await cart.save();
+
+    return sendSuccess(res, cart, `Coupon applied! Discount: $${cart.discountAmount}`);
+  } catch (error) {
+    return sendError(res, 'Failed to apply coupon', 500);
+  }
+});
+
+router.delete('/coupon', verifyToken, async (req, res) => {
+  try {
+    const cart = await Cart.findOne({ userId: req.user.id }).populate('items.productId');
+    if (!cart) return sendError(res, 'Cart not found', 404);
+
+    cart.couponCode = null;
+    cart.discountAmount = 0;
+    await calculateTotals(cart);
+    await cart.save();
+
+    return sendSuccess(res, cart, 'Coupon removed');
+  } catch (error) {
+    return sendError(res, 'Failed to remove coupon', 500);
+  }
+});
 
 router.get('/', verifyToken, async (req, res) => {
   try {
