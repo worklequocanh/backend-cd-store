@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { getLoginAlertEmail } from '../utils/emailTemplates.js';
 import { sendEmail } from '../utils/email.js';
+import { getJwtConfig } from '../config/jwt.js';
 
 const router = express.Router();
 
@@ -21,10 +22,11 @@ router.post('/login', async (req, res) => {
       return sendError(res, 'Invalid credentials', 401);
     }
 
+    const jwtCfg = getJwtConfig();
     const token = jwt.sign(
       { id: user._id, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '1d' }
+      jwtCfg.secret,
+      { expiresIn: jwtCfg.expiresIn }
     );
 
     const userObj = user.toObject();

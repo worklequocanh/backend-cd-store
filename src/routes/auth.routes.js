@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { sendEmail } from '../utils/email.js';
 import { getWelcomeEmail, getLoginAlertEmail, getOtpEmail } from '../utils/emailTemplates.js';
+import { getJwtConfig } from '../config/jwt.js';
 
 const router = express.Router();
 
@@ -26,10 +27,11 @@ router.post('/register', async (req, res) => {
     const user = new User({ name, email, passwordHash: password });
     await user.save();
 
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET || 'secret', { expiresIn: '1d' });
-    const refreshToken = jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET || 'refresh', { expiresIn: '1d' });
+    const jwtCfg = getJwtConfig();
+    const token = jwt.sign({ id: user._id, role: user.role }, jwtCfg.secret, { expiresIn: jwtCfg.expiresIn });
+    const refreshToken = jwt.sign({ id: user._id }, jwtCfg.refreshSecret, { expiresIn: jwtCfg.refreshExpiresIn });
 
-    res.cookie('refreshToken', refreshToken, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
+    res.cookie('refreshToken', refreshToken, { httpOnly: true, maxAge: jwtCfg.cookieMaxAge });
 
     sendEmail({
       to: user.email,
@@ -61,10 +63,11 @@ router.post('/login', async (req, res) => {
       return sendError(res, 'Invalid credentials', 401);
     }
 
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET || 'secret', { expiresIn: '1d' });
-    const refreshToken = jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET || 'refresh', { expiresIn: '1d' });
+    const jwtCfg = getJwtConfig();
+    const token = jwt.sign({ id: user._id, role: user.role }, jwtCfg.secret, { expiresIn: jwtCfg.expiresIn });
+    const refreshToken = jwt.sign({ id: user._id }, jwtCfg.refreshSecret, { expiresIn: jwtCfg.refreshExpiresIn });
 
-    res.cookie('refreshToken', refreshToken, { httpOnly: true, maxAge: 24 * 60 * 60 * 1000 });
+    res.cookie('refreshToken', refreshToken, { httpOnly: true, maxAge: jwtCfg.cookieMaxAge });
 
     const loginTime = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
     sendEmail({
@@ -87,8 +90,9 @@ router.post('/refresh', (req, res) => {
       return sendError(res, 'Refresh token not found', 401);
     }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || 'refresh');
-    const token = jwt.sign({ id: decoded.id }, process.env.JWT_SECRET || 'secret', { expiresIn: '1d' });
+    const jwtCfg = getJwtConfig();
+    const decoded = jwt.verify(refreshToken, jwtCfg.refreshSecret);
+    const token = jwt.sign({ id: decoded.id }, jwtCfg.secret, { expiresIn: jwtCfg.expiresIn });
 
     return sendSuccess(res, { token }, 'Token refreshed');
   } catch (error) {
@@ -103,7 +107,7 @@ router.get('/me', async (req, res) => {
       return sendError(res, 'No token provided', 401);
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret');
+    const decoded = jwt.verify(token, getJwtConfig().secret);
     const user = await User.findById(decoded.id).select('-passwordHash');
 
     if (!user) {
