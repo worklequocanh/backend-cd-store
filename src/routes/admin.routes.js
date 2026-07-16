@@ -192,6 +192,58 @@ router.patch('/contacts/:id/status', verifyToken, verifyRole(['admin']), async (
   }
 });
 
+// POST /api/admin/contacts/:id/reply - Reply to a customer via email
+router.post('/contacts/:id/reply', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { subject, replyMessage } = req.body;
+    if (!replyMessage || !replyMessage.trim()) {
+      return sendError(res, 'Vui lòng nhập nội dung phản hồi cho khách hàng.', 400);
+    }
+
+    const contact = await Contact.findById(req.params.id);
+    if (!contact) {
+      return sendError(res, 'Không tìm thấy lời nhắn liên hệ', 404);
+    }
+
+    const emailSubject = subject || `[CD Store] Phản hồi yêu cầu hỗ trợ: ${contact.subject}`;
+
+    // Send email to customer
+    await sendEmail({
+      to: contact.email,
+      subject: emailSubject,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333; line-height: 1.6;">
+          <h2 style="color: #4f46e5; margin-bottom: 16px;">Xin chào ${contact.name},</h2>
+          <p>Cảm ơn bạn đã liên hệ với <strong>CD Store</strong>. Dưới đây là nội dung phản hồi từ bộ phận chăm sóc khách hàng của chúng tôi về yêu cầu hỗ trợ của bạn:</p>
+          <div style="background-color: #f8fafc; border-left: 4px solid #10b981; padding: 16px; margin: 20px 0; border-radius: 4px;">
+            <p style="margin: 0; color: #1e293b;">${replyMessage.replace(/\n/g, '<br />')}</p>
+          </div>
+          <div style="background-color: #f1f5f9; padding: 12px 16px; border-radius: 4px; font-size: 13px; color: #64748b; margin-top: 24px;">
+            <p style="margin: 0 0 6px 0;"><strong>Lời nhắn gốc của bạn (${contact.subject}):</strong></p>
+            <p style="margin: 0; font-style: italic;">"${contact.message}"</p>
+          </div>
+          <p style="margin-top: 24px;">Nếu có bất kỳ thắc mắc nào khác, bạn có thể trả lời trực tiếp email này hoặc liên hệ Hotline <strong>1900 888 999</strong>.</p>
+          <p>Trân trọng,<br /><strong>Đội ngũ CSKH CD Store</strong></p>
+        </div>
+      `
+    });
+
+    // Update status to 'replied' and append note
+    const timestamp = new Date().toLocaleString('vi-VN');
+    const newNote = `[Đã gửi email phản hồi lúc ${timestamp}]: ${replyMessage}`;
+    contact.status = 'replied';
+    contact.repliedAt = new Date();
+    contact.adminNotes = contact.adminNotes ? `${contact.adminNotes}\n\n${newNote}` : newNote;
+    
+    await contact.save();
+
+    return sendSuccess(res, contact, 'Đã gửi email phản hồi thành công và cập nhật trạng thái!');
+  } catch (error) {
+    console.error('Error replying to contact:', error);
+    return sendError(res, 'Có lỗi xảy ra khi gửi email phản hồi. Vui lòng kiểm tra cấu hình SMTP hoặc thử lại.', 500);
+  }
+});
+
 // DELETE /api/admin/contacts/:id - Delete a contact message
 router.delete('/contacts/:id', verifyToken, verifyRole(['admin']), async (req, res) => {
   try {
