@@ -386,7 +386,7 @@ router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res)
     console.error('SePay IPN Error:', error);
     res.status(500).json({
       success: false,
-      message: 'IPN error'
+      message: 'IPN error: ' + (error.message || String(error))
     });
   }
 });
