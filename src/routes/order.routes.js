@@ -320,6 +320,17 @@ router.post(['/:id/payment-link', '/:id/create-sepay-link', '/:id/create-payos-l
 
 router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res) => {
   try {
+    // Check Authorization header if SEPAY_WEBHOOK_SECRET is configured in .env
+    const webhookSecret = process.env.SEPAY_WEBHOOK_SECRET || process.env.SEPAY_SECRET_KEY;
+    if (webhookSecret) {
+      const authHeader = req.headers['authorization'] || req.headers['x-api-key'] || '';
+      const providedSecret = authHeader.replace(/^(Apikey|Bearer)\s+/i, '').trim();
+      if (providedSecret !== webhookSecret) {
+        console.warn('SePay IPN Unauthorized: Invalid secret key provided in header');
+        return res.status(401).json({ success: false, message: 'Unauthorized IPN request' });
+      }
+    }
+
     console.log('Received SePay IPN Notification:', req.body);
     const body = req.body || {};
     
