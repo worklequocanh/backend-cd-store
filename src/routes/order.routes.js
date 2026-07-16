@@ -301,7 +301,11 @@ router.post(['/:id/payment-link', '/:id/create-sepay-link', '/:id/create-payos-l
     }
 
     const sepay = getSePay();
-    const clientUrl = req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173';
+    let clientUrl = req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173';
+    if (!clientUrl.startsWith('http://') && !clientUrl.startsWith('https://')) {
+      clientUrl = `https://${clientUrl}`;
+    }
+    clientUrl = clientUrl.replace(/\/+$/, '');
     
     const checkoutURL = sepay.checkout.initCheckoutUrl();
     const checkoutFormfields = sepay.checkout.initOneTimePaymentFields({
