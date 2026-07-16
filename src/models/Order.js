@@ -32,13 +32,17 @@ const orderSchema = new mongoose.Schema(
     trackingNumber: String,
     cancelledAt: Date,
     cancelReason: String,
+    stockDeducted: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
 orderSchema.pre('validate', function (next) {
   if (!this.orderNumber) {
-    this.orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Tạo mã đơn hàng theo cấu trúc cấu hình trên SePay: Bắt đầu bằng CDS, theo sau là 8 ký tự số và chữ viết hoa
+    const randomSuffix = Math.random().toString(36).substring(2, 4).toUpperCase();
+    const timeSlice = Date.now().toString().slice(-6);
+    this.orderNumber = `CDS${timeSlice}${randomSuffix}`;
   }
   next();
 });

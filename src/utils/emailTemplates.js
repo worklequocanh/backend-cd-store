@@ -153,3 +153,48 @@ export const getOrderStatusEmail = (order, user) => {
   `;
   return baseTemplate(`Update on Order #${order.orderNumber}`, content);
 };
+
+export const getPaymentSuccessEmail = (order, user) => {
+  const content = `
+    <div style="text-align: center; margin-bottom: 24px;">
+      <div style="width: 64px; height: 64px; background-color: #d1fae5; color: #10b981; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 32px; font-weight: bold;">✓</div>
+    </div>
+    <h2 style="color: #0f172a; font-size: 24px; margin-top: 0; text-align: center;">Payment Successful! 🎉</h2>
+    <p style="font-size: 16px; line-height: 1.6;">Hi <strong>${user.name || 'Valued Customer'}</strong>,</p>
+    <p style="font-size: 16px; line-height: 1.6;">We have successfully received your online payment via <strong>SePay Gateway</strong> for order <strong>#${order.orderNumber}</strong>.</p>
+    
+    <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 24px; border-radius: 12px; margin: 24px 0;">
+      <h3 style="margin-top: 0; margin-bottom: 16px; color: #0f172a; font-size: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 12px;">Payment Receipt</h3>
+      
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 8px;">
+        <tr>
+          <td style="padding: 8px 0; color: #64748b; width: 45%;">Order Invoice Code:</td>
+          <td style="padding: 8px 0; color: #0f172a; font-weight: bold; text-align: right; font-family: monospace;">#${order.orderNumber}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748b;">Amount Paid:</td>
+          <td style="padding: 8px 0; color: #10b981; font-weight: 800; font-size: 18px; text-align: right;">$${order.total?.toFixed(2) || order.total}</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748b;">Payment Gateway:</td>
+          <td style="padding: 8px 0; color: #0f172a; font-weight: bold; text-align: right;">SePay (QR / Bank Transfer)</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 0; color: #64748b;">Transaction Status:</td>
+          <td style="padding: 8px 0; text-align: right;">
+            <span style="background-color: #d1fae5; color: #065f46; padding: 4px 10px; border-radius: 99px; font-weight: bold; font-size: 13px;">
+              COMPLETED
+            </span>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <p style="font-size: 16px; line-height: 1.6;">Your order is now confirmed and is being processed in our warehouse. We will notify you once it ships!</p>
+    <div style="text-align: center; margin: 30px 0 10px;">
+      <a href="${process.env.FRONTEND_URL || 'https://frontend-cd-store.vercel.app'}/orders/${order._id}" style="background-color: #4f46e5; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 16px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.2);">Track Your Order</a>
+    </div>
+  `;
+  return baseTemplate(`Payment Receipt - Order #${order.orderNumber}`, content);
+};
+

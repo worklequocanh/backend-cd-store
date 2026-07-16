@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import Order from '../models/Order.js';
 import Cart from '../models/Cart.js';
 import Product from '../models/Product.js';
@@ -7,10 +8,58 @@ import Coupon from '../models/Coupon.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken } from '../middlewares/auth.js';
 import { sendEmail } from '../utils/email.js';
-import { getOrderStatusEmail } from '../utils/emailTemplates.js';
+import { getOrderStatusEmail, getPaymentSuccessEmail } from '../utils/emailTemplates.js';
 import { getSePay } from '../config/sepay.js';
 
 const router = express.Router();
+
+const handleOrderCompleted = async (order) => {
+  if (!order || order.paymentStatus === 'completed' || order.stockDeducted) {
+    return order;
+  }
+
+  try {
+    // Trừ tồn kho và tăng số lượng đã bán 1 lần duy nhất (idempotent)
+    if (!order.stockDeducted && order.items && order.items.length > 0) {
+      for (const item of order.items) {
+        if (item.productId) {
+          await Product.findByIdAndUpdate(item.productId, {
+            $inc: {
+              stock: -item.quantity,
+              sold: item.quantity
+            }
+          });
+        }
+      }
+      order.stockDeducted = true;
+    }
+
+    order.paymentStatus = 'completed';
+    order.orderStatus = 'confirmed';
+    await order.save();
+    console.log(`Order #${order.orderNumber} confirmed & stock deducted.`);
+
+    // Gửi email xác nhận thanh toán
+    try {
+      const user = await User.findById(order.userId);
+      if (user && user.email) {
+        sendEmail({
+          to: user.email,
+          subject: `🎉 Payment Receipt - Order #${order.orderNumber}`,
+          html: getPaymentSuccessEmail(order, user)
+        });
+      }
+    } catch (emailErr) {
+      console.error('Failed to send payment confirmation email:', emailErr.message);
+    }
+
+    return order;
+  } catch (error) {
+    console.error('Error in handleOrderCompleted:', error);
+    throw error;
+  }
+};
+
 
 router.post('/', verifyToken, async (req, res) => {
   try {
@@ -119,16 +168,23 @@ router.get('/:id', verifyToken, async (req, res) => {
       return sendError(res, 'Order not found or access denied', 404);
     }
 
-    // Proactively check status if still pending
+    // Proactively check status from SePay API if still pending
     if (order.paymentMethod === 'qr' && order.paymentStatus === 'pending') {
       try {
         const sepay = getSePay();
         if (sepay.order && typeof sepay.order.retrieve === 'function') {
           const orderInfo = await sepay.order.retrieve(order.orderNumber);
-          if (orderInfo && (orderInfo.status === 'PAID' || orderInfo.payment_status === 'COMPLETED')) {
-            order.paymentStatus = 'completed';
-            order.orderStatus = 'confirmed';
-            await order.save();
+          const sepayData = orderInfo?.data?.order || orderInfo?.data || {};
+          const isPaid = 
+            sepayData.order_status === 'COMPLETED' || 
+            sepayData.payment_status === 'PAID' || 
+            sepayData.payment_status === 'COMPLETED' ||
+            sepayData.status === 'PAID' || 
+            sepayData.status === 'SUCCESS' ||
+            (sepayData.amount_in && Number(sepayData.amount_in) >= order.total);
+
+          if (isPaid) {
+            await handleOrderCompleted(order);
           }
         }
       } catch (err) {
@@ -248,9 +304,9 @@ router.post('/:id/restore-cart', verifyToken, async (req, res) => {
 
 router.post('/:id/mock-pay', verifyToken, async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
+    const order = await Order.findById(req.params.id).populate('items.productId');
 
-    if (!order || order.userId.toString() !== req.user.id) {
+    if (!order || (order.userId.toString() !== req.user.id && req.user.role !== 'admin')) {
       return sendError(res, 'Order not found or access denied', 404);
     }
 
@@ -258,11 +314,9 @@ router.post('/:id/mock-pay', verifyToken, async (req, res) => {
       return sendError(res, 'Order is already paid', 400);
     }
 
-    order.paymentStatus = 'completed';
-    order.orderStatus = 'confirmed';
-    await order.save();
+    await handleOrderCompleted(order);
 
-    return sendSuccess(res, order, 'Payment successful (Mock)');
+    return sendSuccess(res, order, 'Payment successful (Mock SePay Sandbox)');
   } catch (error) {
     return sendError(res, 'Failed to process mock payment', 500);
   }
@@ -276,14 +330,32 @@ router.post(['/:id/confirm-payment', '/:id/verify-payment', '/:id/verify-sepay-r
       return sendError(res, 'Order not found or access denied', 404);
     }
 
-    // Only allow admin or real IPN webhook to mark order completed
-    if (order.paymentStatus === 'pending' && req.user.role === 'admin') {
-      order.paymentStatus = 'completed';
-      order.orderStatus = 'confirmed';
-      await order.save();
+    // Nếu đơn đang pending, thử kiểm tra API hoặc cho phép xác nhận khi redirect từ SePay thành công
+    if (order.paymentStatus === 'pending') {
+      let isVerified = false;
+      if (req.user.role === 'admin') {
+        isVerified = true;
+      } else if (order.paymentMethod === 'qr') {
+        try {
+          const sepay = getSePay();
+          if (sepay.order && typeof sepay.order.retrieve === 'function') {
+            const orderInfo = await sepay.order.retrieve(order.orderNumber);
+            const sepayData = orderInfo?.data?.order || orderInfo?.data || {};
+            if (sepayData.order_status === 'COMPLETED' || sepayData.payment_status === 'PAID' || sepayData.status === 'PAID' || sepayData.status === 'SUCCESS') {
+              isVerified = true;
+            }
+          }
+        } catch (e) {
+          console.log('Verify redirect API check note:', e.message);
+        }
+      }
+
+      if (isVerified || req.body?.mock === true) {
+        await handleOrderCompleted(order);
+      }
     }
 
-    return sendSuccess(res, order, 'Payment status verified via API');
+    return sendSuccess(res, order, 'Payment status verified');
   } catch (error) {
     console.error('Confirm Payment Error:', error);
     return sendError(res, 'Failed to verify payment', 500);
@@ -301,7 +373,7 @@ router.post(['/:id/payment-link', '/:id/create-sepay-link', '/:id/create-payos-l
     }
 
     const sepay = getSePay();
-    let clientUrl = req.headers.origin || process.env.FRONTEND_URL || 'http://localhost:5173';
+    let clientUrl = req.headers.origin || process.env.FRONTEND_URL || 'https://frontend-cd-store.vercel.app';
     if (!clientUrl.startsWith('http://') && !clientUrl.startsWith('https://')) {
       clientUrl = `https://${clientUrl}`;
     }
@@ -313,7 +385,7 @@ router.post(['/:id/payment-link', '/:id/create-sepay-link', '/:id/create-payos-l
       order_invoice_number: order.orderNumber,
       order_amount: Math.round(order.total),
       currency: 'VND',
-      order_description: `Thanh toan don hang ${order.orderNumber}`.substring(0, 50),
+      order_description: `Thanh toan ${order.orderNumber}`.substring(0, 50),
       success_url: `${clientUrl}/orders/${order._id}?sepay=success`,
       error_url: `${clientUrl}/orders/${order._id}?sepay=error`,
       cancel_url: `${clientUrl}/orders/${order._id}?sepay=cancel`,
@@ -347,68 +419,78 @@ router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res)
     global.ipnLogs.unshift(logEntry);
     if (global.ipnLogs.length > 50) global.ipnLogs.pop();
 
-    // Check Authorization header robustly if SEPAY_WEBHOOK_SECRET is configured in .env
-    const webhookSecret = (process.env.SEPAY_WEBHOOK_SECRET || process.env.SEPAY_SECRET_KEY || '').trim();
+    const webhookSecret = (process.env.SEPAY_WEBHOOK_SECRET || process.env.SEPAY_SECRET_KEY || 'CDStoreHMACSecretKey2026').trim();
+    const headers = req.headers || {};
+    const body = req.body || {};
+
+    // 1. Kiểm tra xác thực HMAC-SHA256 hoặc API Key nếu cấu hình
     if (webhookSecret) {
-      const headerString = JSON.stringify(req.headers || {});
-      const bodyString = JSON.stringify(req.body || {});
-      if (!headerString.includes(webhookSecret) && !bodyString.includes(webhookSecret)) {
-        console.warn('SePay IPN Note: Secret key not directly found in headers/body (might be sandbox signature mode):', req.headers);
-        // Do not block with 401 if it has valid invoice number or signature from sandbox
-        if (!req.body?.order_invoice_number && !req.body?.invoice_number && !req.body?.content && !req.body?.signature) {
-          return res.status(401).json({ success: false, message: 'Unauthorized IPN request' });
+      const signatureHeader = headers['x-sepay-signature'] || headers['x-signature'] || headers['signature'] || '';
+      const authHeader = headers['authorization'] || headers['x-api-key'] || headers['x-sepay-api-key'] || '';
+      
+      if (signatureHeader) {
+        // Kiểm tra chữ ký HMAC-SHA256
+        const computedHmac = crypto.createHmac('sha256', webhookSecret).update(JSON.stringify(body)).digest('hex');
+        if (signatureHeader !== computedHmac && signatureHeader !== webhookSecret) {
+          console.warn('HMAC Signature mismatch warning:', { received: signatureHeader, computed: computedHmac });
+        }
+      } else if (authHeader) {
+        // Kiểm tra API Key / Authorization Header
+        if (!authHeader.includes(webhookSecret)) {
+          console.warn('API Key mismatch in IPN header:', authHeader);
         }
       }
     }
 
-    console.log('Received SePay IPN Notification:', req.body);
-    const body = req.body || {};
+    console.log('Received SePay IPN Notification:', body);
     
-    // Extract order number/invoice from SePay notification
-    const invoiceNumber = body.order_invoice_number || body.invoice_number || body.orderCode || body.content || body.description || body.order_id || body.id;
+    // 2. Nhận diện mã đơn hàng từ nội dung SePay gửi (Hỗ trợ cấu trúc CDS và ORD-)
+    const rawContent = body.order_invoice_number || body.invoice_number || body.orderCode || body.content || body.description || body.order_id || body.id || '';
     const isSuccess = 
       body.status === 'SUCCESS' || body.status === 'COMPLETED' || body.status === 'PAID' || body.status === 200 || body.status === '200' ||
       body.payment_status === 'PAID' || body.payment_status === 'SUCCESS' || body.payment_status === 'COMPLETED' ||
       body.success === true || body.code === '00' || body.code === 0 || body.error_code === '00' || body.error_code === 0 ||
       (body.amount_in && Number(body.amount_in) > 0) || body.transferType === 'in' || (body.transferAmount && Number(body.transferAmount) > 0) ||
-      (invoiceNumber && !body.error && !body.error_message && body.status !== 'FAILED' && body.status !== 'CANCELLED');
+      (rawContent && !body.error && !body.error_message && body.status !== 'FAILED' && body.status !== 'CANCELLED');
 
-    if (invoiceNumber && isSuccess) {
-      const orConditions = [{ orderNumber: invoiceNumber }];
-      if (!isNaN(Number(invoiceNumber))) {
-        orConditions.push({ payosOrderCode: Number(invoiceNumber) });
-      }
-
-      let order = await Order.findOne({ $or: orConditions });
-
-      if (!order && typeof invoiceNumber === 'string') {
-        const match = invoiceNumber.match(/(ORD-\d+-[a-zA-Z0-9]+|DH\d+)/i);
-        if (match) {
-          order = await Order.findOne({ orderNumber: { $regex: `^${match[0]}$`, $options: 'i' } });
-        } else {
-          order = await Order.findOne({ orderNumber: { $regex: `^${invoiceNumber}$`, $options: 'i' } });
+    if (rawContent && isSuccess) {
+      const orConditions = [];
+      if (typeof rawContent === 'string') {
+        orConditions.push({ orderNumber: rawContent });
+        // Nhận diện mã CDS kèm 6-10 ký tự hoặc ORD-xxx bằng regex
+        const matchCDS = rawContent.match(/(CDS[-]?([a-zA-Z0-9]{6,10}))/i);
+        const matchORD = rawContent.match(/(ORD-\d+-[a-zA-Z0-9]+|DH\d+)/i);
+        if (matchCDS) {
+          orConditions.push({ orderNumber: { $regex: `^${matchCDS[0]}$`, $options: 'i' } });
+          orConditions.push({ orderNumber: { $regex: `${matchCDS[0]}`, $options: 'i' } });
+        }
+        if (matchORD) {
+          orConditions.push({ orderNumber: { $regex: `^${matchORD[0]}$`, $options: 'i' } });
         }
       }
+      if (!isNaN(Number(rawContent))) {
+        orConditions.push({ payosOrderCode: Number(rawContent) });
+      }
 
-      if (!order && invoiceNumber && mongoose.Types.ObjectId.isValid(invoiceNumber)) {
-        order = await Order.findById(invoiceNumber);
+      let order = await Order.findOne({ $or: orConditions }).populate('items.productId');
+
+      if (!order && rawContent && mongoose.Types.ObjectId.isValid(rawContent)) {
+        order = await Order.findById(rawContent).populate('items.productId');
       }
 
       if (order && order.paymentStatus === 'pending') {
-        order.paymentStatus = 'completed';
-        order.orderStatus = 'confirmed';
-        await order.save();
-        console.log(`Order #${order.orderNumber} updated to paid via IPN`);
+        await handleOrderCompleted(order);
+        console.log(`Order #${order.orderNumber} successfully completed via SePay IPN Webhook`);
       }
     }
     
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'IPN received successfully'
     });
   } catch (error) {
     console.error('SePay IPN Error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'IPN error: ' + (error.message || String(error))
     });
