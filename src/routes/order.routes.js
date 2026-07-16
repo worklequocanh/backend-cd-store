@@ -256,51 +256,6 @@ router.post('/:id/cancel', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/:id/restore-cart', verifyToken, async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id);
-
-    if (!order || order.userId.toString() !== req.user.id) {
-      return sendError(res, 'Order not found or access denied', 404);
-    }
-
-    if (order.paymentStatus !== 'pending') {
-      return sendError(res, 'Only pending orders can be restored to cart', 400);
-    }
-
-    let cart = await Cart.findOne({ userId: req.user.id });
-    if (!cart) {
-      cart = new Cart({ userId: req.user.id, items: [] });
-    }
-
-    // Restore items to cart
-    order.items.forEach(orderItem => {
-      const existingItemIndex = cart.items.findIndex(
-        item => item.productId.toString() === orderItem.productId.toString() && item.variant === orderItem.variant
-      );
-
-      if (existingItemIndex > -1) {
-        cart.items[existingItemIndex].quantity += orderItem.quantity;
-      } else {
-        cart.items.push({
-          productId: orderItem.productId,
-          quantity: orderItem.quantity,
-          variant: orderItem.variant
-        });
-      }
-    });
-
-    await cart.save();
-    
-    // Delete the pending order since user cancelled payment
-    await Order.findByIdAndDelete(order._id);
-
-    return sendSuccess(res, null, 'Cart restored successfully');
-  } catch (error) {
-    console.error('Failed to restore cart:', error);
-    return sendError(res, 'Failed to restore cart', 500);
-  }
-});
 
 router.post('/:id/mock-pay', verifyToken, async (req, res) => {
   try {
@@ -322,7 +277,7 @@ router.post('/:id/mock-pay', verifyToken, async (req, res) => {
   }
 });
 
-router.post(['/:id/confirm-payment', '/:id/verify-payment', '/:id/verify-sepay-redirect'], verifyToken, async (req, res) => {
+router.post('/:id/verify-sepay-redirect', verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id).populate('items.productId');
 
@@ -362,7 +317,7 @@ router.post(['/:id/confirm-payment', '/:id/verify-payment', '/:id/verify-sepay-r
   }
 });
 
-router.post(['/:id/payment-link', '/:id/create-sepay-link', '/:id/create-payos-link'], verifyToken, async (req, res) => {
+router.post(['/:id/create-sepay-link', '/:id/create-payos-link'], verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id).populate('items.productId');
     if (!order || order.userId.toString() !== req.user.id) {
