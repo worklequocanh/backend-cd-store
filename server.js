@@ -18,6 +18,7 @@ import reviewRoutes from './src/routes/review.routes.js';
 import adminRoutes from './src/routes/admin.routes.js';
 import adminAuthRoutes from './src/routes/adminAuth.routes.js';
 import uploadRoutes from './src/routes/upload.routes.js';
+import contactRoutes from './src/routes/contact.routes.js';
 
 dotenv.config();
 
@@ -53,6 +54,7 @@ app.use('/api/coupons', couponRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/contact', contactRoutes);
 
 // 404 handler
 app.use((_req, res) => res.status(404).json({ success: false, message: 'Route not found' }));

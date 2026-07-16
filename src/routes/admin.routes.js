@@ -3,6 +3,7 @@ import Order from '../models/Order.js';
 import User from '../models/User.js';
 import Product from '../models/Product.js';
 import Review from '../models/Review.js';
+import Contact from '../models/Contact.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken, verifyRole } from '../middlewares/auth.js';
 import { sendEmail } from '../utils/email.js';
@@ -41,8 +42,10 @@ router.get('/dashboard', verifyToken, verifyRole(['admin']), async (req, res) =>
     ]);
     const totalRevenue = revenueAgg[0] || { total: 0 };
     const pendingOrders = await Order.countDocuments({ orderStatus: 'pending' });
+    const unreadContacts = await Contact.countDocuments({ status: 'unread' });
 
     const recentOrders = await Order.find().sort({ createdAt: -1 }).limit(5).populate('userId', 'name email');
+    const recentContacts = await Contact.find().sort({ createdAt: -1 }).limit(5);
 
     return sendSuccess(res, {
       totalOrders,
@@ -50,7 +53,9 @@ router.get('/dashboard', verifyToken, verifyRole(['admin']), async (req, res) =>
       totalProducts,
       totalRevenue: totalRevenue.total,
       pendingOrders,
+      unreadContacts,
       recentOrders,
+      recentContacts,
     });
   } catch (error) {
     console.error(error);
@@ -128,6 +133,75 @@ router.get('/analytics/products', verifyToken, verifyRole(['admin']), async (req
     return sendSuccess(res, topProducts);
   } catch (error) {
     return sendError(res, 'Failed to fetch product analytics', 500);
+  }
+});
+
+// GET /api/admin/contacts - List all contact messages with filtering and pagination
+router.get('/contacts', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const { status, search } = req.query;
+
+    const filter = {};
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { subject: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const contacts = await Contact.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit);
+    const total = await Contact.countDocuments(filter);
+    const pages = Math.ceil(total / limit);
+
+    return sendSuccess(res, { contacts, page, pages, total });
+  } catch (error) {
+    return sendError(res, 'Failed to fetch contact messages', 500);
+  }
+});
+
+// PATCH /api/admin/contacts/:id/status - Update contact status / admin notes
+router.patch('/contacts/:id/status', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { status, adminNotes } = req.body;
+    const updateFields = {};
+    if (status) {
+      updateFields.status = status;
+      if (status === 'replied' && !req.body.repliedAt) {
+        updateFields.repliedAt = new Date();
+      }
+    }
+    if (adminNotes !== undefined) {
+      updateFields.adminNotes = adminNotes;
+    }
+
+    const contact = await Contact.findByIdAndUpdate(req.params.id, updateFields, { new: true });
+    if (!contact) {
+      return sendError(res, 'Contact message not found', 404);
+    }
+
+    return sendSuccess(res, contact, 'Contact message updated');
+  } catch (error) {
+    return sendError(res, 'Failed to update contact message', 500);
+  }
+});
+
+// DELETE /api/admin/contacts/:id - Delete a contact message
+router.delete('/contacts/:id', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const contact = await Contact.findByIdAndDelete(req.params.id);
+    if (!contact) {
+      return sendError(res, 'Contact message not found', 404);
+    }
+    return sendSuccess(res, { id: req.params.id }, 'Contact message deleted successfully');
+  } catch (error) {
+    return sendError(res, 'Failed to delete contact message', 500);
   }
 });
 
