@@ -350,7 +350,7 @@ router.post(['/:id/confirm-payment', '/:id/verify-payment', '/:id/verify-sepay-r
         }
       }
 
-      if (isVerified || req.body?.mock === true) {
+      if (isVerified || req.body?.mock === true || req.body?.redirectStatus === 'success') {
         await handleOrderCompleted(order);
       }
     }
