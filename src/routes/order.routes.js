@@ -426,7 +426,7 @@ router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res)
     // 1. Kiểm tra xác thực HMAC-SHA256 hoặc API Key nếu cấu hình
     if (webhookSecret) {
       const signatureHeader = headers['x-sepay-signature'] || headers['x-signature'] || headers['signature'] || '';
-      const authHeader = headers['authorization'] || headers['x-api-key'] || headers['x-sepay-api-key'] || '';
+      const authHeader = headers['authorization'] || headers['x-api-key'] || headers['x-sepay-api-key'] || headers['x-secret-key'] || '';
       
       if (signatureHeader) {
         // Kiểm tra chữ ký HMAC-SHA256
@@ -435,7 +435,7 @@ router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res)
           console.warn('HMAC Signature mismatch warning:', { received: signatureHeader, computed: computedHmac });
         }
       } else if (authHeader) {
-        // Kiểm tra API Key / Authorization Header
+        // Kiểm tra API Key / Authorization Header / x-secret-key
         if (!authHeader.includes(webhookSecret)) {
           console.warn('API Key mismatch in IPN header:', authHeader);
         }
@@ -444,9 +444,15 @@ router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res)
 
     console.log('Received SePay IPN Notification:', body);
     
-    // 2. Nhận diện mã đơn hàng từ nội dung SePay gửi (Hỗ trợ cấu trúc CDS và ORD-)
-    const rawContent = body.order_invoice_number || body.invoice_number || body.orderCode || body.content || body.description || body.order_id || body.id || '';
+    // 2. Nhận diện mã đơn hàng từ nội dung SePay gửi (Hỗ trợ cấu trúc CDS, ORD-, và payload SePay Checkout nested order)
+    const rawContent = 
+      body?.order?.order_invoice_number || body?.order?.order_description || body?.order?.order_id || body?.order?.id ||
+      body.order_invoice_number || body.invoice_number || body.orderCode || body.content || body.description || body.order_id || body.id || '';
+      
     const isSuccess = 
+      body?.notification_type === 'ORDER_PAID' || body?.notification_type === 'PAYMENT_SUCCESS' ||
+      body?.order?.order_status === 'CAPTURED' || body?.order?.order_status === 'COMPLETED' || body?.order?.order_status === 'PAID' || body?.order?.order_status === 'SUCCESS' ||
+      body?.transaction?.transaction_status === 'APPROVED' || body?.transaction?.transaction_status === 'SUCCESS' ||
       body.status === 'SUCCESS' || body.status === 'COMPLETED' || body.status === 'PAID' || body.status === 200 || body.status === '200' ||
       body.payment_status === 'PAID' || body.payment_status === 'SUCCESS' || body.payment_status === 'COMPLETED' ||
       body.success === true || body.code === '00' || body.code === 0 || body.error_code === '00' || body.error_code === 0 ||
