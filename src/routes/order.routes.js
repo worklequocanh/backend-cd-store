@@ -276,13 +276,7 @@ router.post(['/:id/confirm-payment', '/:id/verify-payment'], verifyToken, async 
       return sendError(res, 'Order not found or access denied', 404);
     }
 
-    if (order.paymentStatus === 'pending') {
-      order.paymentStatus = 'completed';
-      order.orderStatus = 'confirmed';
-      await order.save();
-    }
-
-    return sendSuccess(res, order, 'Payment verified successfully');
+    return sendSuccess(res, order, 'Payment status verified via API');
   } catch (error) {
     console.error('Confirm Payment Error:', error);
     return sendError(res, 'Failed to verify payment', 500);
