@@ -1,7 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
-import helmet from 'helmet';
+import { helmetSecurity, sanitizeData, apiLimiter, authLimiter } from './src/middlewares/security.js';
 import morgan from 'morgan';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
@@ -25,10 +25,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(helmet());
+app.use(helmetSecurity);
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow all origins for the student project to prevent CORS errors
     callback(null, true);
   },
   credentials: true
@@ -38,13 +37,15 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(sanitizeData);
+app.use('/api', apiLimiter);
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'cd-store-api', timestamp: new Date() }));
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/admin/auth', adminAuthRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/admin/auth', authLimiter, adminAuthRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/products', productRoutes);

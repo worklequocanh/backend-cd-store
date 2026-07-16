@@ -2,10 +2,11 @@ import express from 'express';
 import Product from '../models/Product.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken, verifyRole } from '../middlewares/auth.js';
+import { cacheMiddleware, clearCache } from '../middlewares/cache.js';
 
 const router = express.Router();
 
-router.get('/', async (req, res) => {
+router.get('/', cacheMiddleware(300), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
@@ -29,7 +30,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/:slug', async (req, res) => {
+router.get('/:slug', cacheMiddleware(300), async (req, res) => {
   try {
     const product = await Product.findOne({ slug: req.params.slug }).populate('categoryId');
     if (!product) {
@@ -50,6 +51,7 @@ router.post('/', verifyToken, verifyRole(['admin']), async (req, res) => {
 
     const product = new Product({ ...req.body, slug: slug.toLowerCase() });
     await product.save();
+    clearCache('/api/products');
 
     return sendSuccess(res, product, 'Product created', 201);
   } catch (error) {
@@ -64,6 +66,7 @@ router.patch('/:id', verifyToken, verifyRole(['admin']), async (req, res) => {
     if (!product) {
       return sendError(res, 'Product not found', 404);
     }
+    clearCache('/api/products');
     return sendSuccess(res, product, 'Product updated');
   } catch (error) {
     return sendError(res, 'Failed to update product', 500);
@@ -76,6 +79,7 @@ router.delete('/:id', verifyToken, verifyRole(['admin']), async (req, res) => {
     if (!product) {
       return sendError(res, 'Product not found', 404);
     }
+    clearCache('/api/products');
     return sendSuccess(res, null, 'Product deleted');
   } catch (error) {
     return sendError(res, 'Failed to delete product', 500);

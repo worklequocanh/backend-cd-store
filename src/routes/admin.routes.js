@@ -7,6 +7,7 @@ import Contact from '../models/Contact.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken, verifyRole } from '../middlewares/auth.js';
 import { sendEmail } from '../utils/email.js';
+import { handleDataExport } from '../services/export.service.js';
 
 const router = express.Router();
 
@@ -104,35 +105,165 @@ router.patch('/orders/:id/status', verifyToken, verifyRole(['admin']), async (re
   }
 });
 
+// Helper to get date threshold based on timeframe parameter
+function getDateFilter(timeframe) {
+  const now = new Date();
+  if (timeframe === '7d') return new Date(now.setDate(now.getDate() - 7));
+  if (timeframe === '30d') return new Date(now.setDate(now.getDate() - 30));
+  if (timeframe === '90d') return new Date(now.setDate(now.getDate() - 90));
+  if (timeframe === '1y') return new Date(now.setFullYear(now.getFullYear() - 1));
+  return null;
+}
+
 router.get('/analytics/revenue', verifyToken, verifyRole(['admin']), async (req, res) => {
   try {
-    const revenue = await Order.aggregate([
-      { $match: { orderStatus: { $ne: 'cancelled' } } },
-      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, total: { $sum: '$total' }, count: { $sum: 1 } } },
-      { $sort: { _id: -1 } },
-      { $limit: 30 },
+    const { timeframe = '30d' } = req.query;
+    const dateLimit = getDateFilter(timeframe);
+    
+    const matchStage = { orderStatus: { $ne: 'cancelled' } };
+    if (dateLimit) matchStage.createdAt = { $gte: dateLimit };
+
+    const revenueAgg = await Order.aggregate([
+      { $match: matchStage },
+      { 
+        $group: { 
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, 
+          total: { $sum: { $ifNull: ['$totalAmount', '$total'] } }, 
+          count: { $sum: 1 } 
+        } 
+      },
+      { $sort: { _id: 1 } } // Left to right chronological order for charts
     ]);
 
-    return sendSuccess(res, revenue);
+    const formatted = revenueAgg.map(item => ({
+      date: item._id,
+      revenue: Math.round(item.total || 0),
+      orders: item.count || 0
+    }));
+
+    return sendSuccess(res, formatted);
   } catch (error) {
+    console.error('Revenue analytics error:', error);
     return sendError(res, 'Failed to fetch revenue analytics', 500);
   }
 });
 
 router.get('/analytics/products', verifyToken, verifyRole(['admin']), async (req, res) => {
   try {
+    const { timeframe = '30d', limit = 10 } = req.query;
+    const dateLimit = getDateFilter(timeframe);
+    
+    const matchStage = { orderStatus: { $ne: 'cancelled' } };
+    if (dateLimit) matchStage.createdAt = { $gte: dateLimit };
+
     const topProducts = await Order.aggregate([
-      { $match: { orderStatus: { $ne: 'cancelled' } } },
+      { $match: matchStage },
       { $unwind: '$items' },
-      { $group: { _id: '$items.productId', totalSold: { $sum: '$items.quantity' }, totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } } },
+      { 
+        $group: { 
+          _id: '$items.productId', 
+          totalSold: { $sum: '$items.quantity' }, 
+          totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } 
+        } 
+      },
       { $sort: { totalSold: -1 } },
-      { $limit: 10 },
+      { $limit: parseInt(limit) || 10 },
       { $lookup: { from: 'products', localField: '_id', foreignField: '_id', as: 'product' } },
+      { $unwind: { path: '$product', preserveNullAndEmptyArrays: true } }
     ]);
 
-    return sendSuccess(res, topProducts);
+    const formatted = topProducts.map(item => ({
+      id: item._id?.toString() || 'unknown',
+      name: item.product?.name || 'Sản phẩm CD',
+      sold: item.totalSold || 0,
+      revenue: Math.round(item.totalRevenue || 0)
+    }));
+
+    return sendSuccess(res, formatted);
   } catch (error) {
+    console.error('Product analytics error:', error);
     return sendError(res, 'Failed to fetch product analytics', 500);
+  }
+});
+
+router.get('/analytics/categories', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { timeframe = '30d' } = req.query;
+    const dateLimit = getDateFilter(timeframe);
+    
+    const matchStage = { orderStatus: { $ne: 'cancelled' } };
+    if (dateLimit) matchStage.createdAt = { $gte: dateLimit };
+
+    const catDistribution = await Order.aggregate([
+      { $match: matchStage },
+      { $unwind: '$items' },
+      { $lookup: { from: 'products', localField: 'items.productId', foreignField: '_id', as: 'productInfo' } },
+      { $unwind: { path: '$productInfo', preserveNullAndEmptyArrays: true } },
+      { $lookup: { from: 'categories', localField: 'productInfo.categoryId', foreignField: '_id', as: 'categoryInfo' } },
+      { $unwind: { path: '$categoryInfo', preserveNullAndEmptyArrays: true } },
+      { 
+        $group: { 
+          _id: { $ifNull: ['$categoryInfo.name', 'Chưa Phân Loại'] }, 
+          value: { $sum: '$items.quantity' }, 
+          revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } 
+        } 
+      },
+      { $sort: { value: -1 } }
+    ]);
+
+    const formatted = catDistribution.map(item => ({
+      name: item._id,
+      value: item.value || 0,
+      revenue: Math.round(item.revenue || 0)
+    }));
+
+    return sendSuccess(res, formatted);
+  } catch (error) {
+    console.error('Category analytics error:', error);
+    return sendError(res, 'Failed to fetch category analytics', 500);
+  }
+});
+
+router.get('/analytics/status', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { timeframe = '30d' } = req.query;
+    const dateLimit = getDateFilter(timeframe);
+    
+    const matchStage = {};
+    if (dateLimit) matchStage.createdAt = { $gte: dateLimit };
+
+    const statusAgg = await Order.aggregate([
+      { $match: matchStage },
+      { $group: { _id: '$orderStatus', count: { $sum: 1 } } }
+    ]);
+
+    const colorMap = {
+      pending: '#f59e0b',
+      confirmed: '#3b82f6',
+      shipped: '#8b5cf6',
+      delivered: '#10b981',
+      cancelled: '#ef4444'
+    };
+
+    const nameMap = {
+      pending: 'Đang chờ duyệt',
+      confirmed: 'Đã xác nhận',
+      shipped: 'Đang giao hàng',
+      delivered: 'Đã giao thành công',
+      cancelled: 'Đã hủy'
+    };
+
+    const formatted = statusAgg.map(item => ({
+      statusKey: item._id || 'pending',
+      name: nameMap[item._id] || item._id,
+      value: item.count || 0,
+      color: colorMap[item._id] || '#64748b'
+    }));
+
+    return sendSuccess(res, formatted);
+  } catch (error) {
+    console.error('Status analytics error:', error);
+    return sendError(res, 'Failed to fetch order status analytics', 500);
   }
 });
 
@@ -254,6 +385,115 @@ router.delete('/contacts/:id', verifyToken, verifyRole(['admin']), async (req, r
     return sendSuccess(res, { id: req.params.id }, 'Contact message deleted successfully');
   } catch (error) {
     return sendError(res, 'Failed to delete contact message', 500);
+  }
+});
+
+// Export Orders
+router.get('/export/orders', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const format = req.query.format || 'xlsx';
+    const status = req.query.status;
+    const filter = {};
+    if (status && status !== 'all') filter.orderStatus = status;
+
+    const orders = await Order.find(filter).populate('userId', 'name email').sort({ createdAt: -1 });
+
+    const columns = [
+      { header: 'ID Đơn Hàng', key: 'id', width: 25 },
+      { header: 'Mã Hóa Đơn', key: 'orderNumber', width: 18 },
+      { header: 'Khách Hàng', key: 'customer', width: 25 },
+      { header: 'Số Điện Thoại', key: 'phone', width: 16 },
+      { header: 'Địa Chỉ Giao Hàng', key: 'address', width: 35 },
+      { header: 'Tổng Tiền (VND)', key: 'total', width: 18 },
+      { header: 'Phương Thức TT', key: 'paymentMethod', width: 18 },
+      { header: 'Trạng Thái TT', key: 'paymentStatus', width: 18 },
+      { header: 'Trạng Thái Đơn', key: 'orderStatus', width: 18 },
+      { header: 'Ngày Đặt Hàng', key: 'createdAt', width: 22 }
+    ];
+
+    const data = orders.map(o => ({
+      id: o._id.toString(),
+      orderNumber: o.invoiceNumber || o.orderNumber || o._id.toString().slice(-6).toUpperCase(),
+      customer: o.shippingAddress?.fullName || o.userId?.name || 'Khách Vãng Lai',
+      phone: o.shippingAddress?.phone || 'N/A',
+      address: `${o.shippingAddress?.address || ''}, ${o.shippingAddress?.city || ''}`,
+      total: Number(o.totalAmount || 0),
+      paymentMethod: o.paymentMethod ? o.paymentMethod.toUpperCase() : 'QR/BANK',
+      paymentStatus: o.paymentStatus === 'completed' ? 'Đã Thanh Toán' : 'Chưa TT',
+      orderStatus: o.orderStatus === 'delivered' ? 'Đã Giao' : o.orderStatus === 'cancelled' ? 'Đã Hủy' : 'Đang Xử Lý',
+      createdAt: new Date(o.createdAt).toLocaleString('vi-VN')
+    }));
+
+    return handleDataExport(res, format, 'Orders Export', columns, data, `Orders_Export_${Date.now()}`);
+  } catch (error) {
+    console.error('Export orders error:', error);
+    return sendError(res, 'Failed to export orders data', 500);
+  }
+});
+
+// Export Products
+router.get('/export/products', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const format = req.query.format || 'xlsx';
+    const products = await Product.find().populate('categoryId', 'name').sort({ createdAt: -1 });
+
+    const columns = [
+      { header: 'ID Sản Phẩm', key: 'id', width: 25 },
+      { header: 'Tên Đĩa CD / Vinyl', key: 'name', width: 35 },
+      { header: 'Danh Mục', key: 'category', width: 22 },
+      { header: 'Nghệ Sĩ / Tác Giả', key: 'artist', width: 25 },
+      { header: 'Giá Bán (VND)', key: 'price', width: 18 },
+      { header: 'Số Lượng Tồn', key: 'stock', width: 15 },
+      { header: 'Trạng Thái', key: 'status', width: 16 },
+      { header: 'Ngày Tạo', key: 'createdAt', width: 22 }
+    ];
+
+    const data = products.map(p => ({
+      id: p._id.toString(),
+      name: p.name || 'N/A',
+      category: p.categoryId?.name || 'Chưa Phân Loại',
+      artist: p.artist || 'Nhiều Nghệ Sĩ',
+      price: Number(p.price || 0),
+      stock: p.stock || 0,
+      status: p.isActive ? 'Đang Bán' : 'Tạm Ẩn',
+      createdAt: new Date(p.createdAt).toLocaleString('vi-VN')
+    }));
+
+    return handleDataExport(res, format, 'Products Inventory', columns, data, `Products_Export_${Date.now()}`);
+  } catch (error) {
+    console.error('Export products error:', error);
+    return sendError(res, 'Failed to export products data', 500);
+  }
+});
+
+// Export Users
+router.get('/export/users', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const format = req.query.format || 'xlsx';
+    const users = await User.find().sort({ createdAt: -1 });
+
+    const columns = [
+      { header: 'ID Khách Hàng', key: 'id', width: 25 },
+      { header: 'Họ và Tên', key: 'name', width: 25 },
+      { header: 'Địa Chỉ Email', key: 'email', width: 30 },
+      { header: 'Vai Trò', key: 'role', width: 15 },
+      { header: 'Xác Thực', key: 'isVerified', width: 15 },
+      { header: 'Ngày Tham Gia', key: 'createdAt', width: 22 }
+    ];
+
+    const data = users.map(u => ({
+      id: u._id.toString(),
+      name: u.name || 'Khách Hàng',
+      email: u.email || 'N/A',
+      role: u.role === 'admin' ? 'Quản Trị Viên' : 'Khách Hàng',
+      isVerified: u.isVerified ? 'Đã Xác Thực' : 'Chưa XT',
+      createdAt: new Date(u.createdAt).toLocaleString('vi-VN')
+    }));
+
+    return handleDataExport(res, format, 'Users Directory', columns, data, `Users_Export_${Date.now()}`);
+  } catch (error) {
+    console.error('Export users error:', error);
+    return sendError(res, 'Failed to export users data', 500);
   }
 });
 

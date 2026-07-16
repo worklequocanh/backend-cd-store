@@ -2,10 +2,11 @@ import express from 'express';
 import Coupon from '../models/Coupon.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken, verifyRole } from '../middlewares/auth.js';
+import { cacheMiddleware, clearCache } from '../middlewares/cache.js';
 
 const router = express.Router();
 
-router.get('/admin', verifyToken, verifyRole(['admin']), async (req, res) => {
+router.get('/admin', verifyToken, verifyRole(['admin']), cacheMiddleware(300), async (req, res) => {
   try {
     const coupons = await Coupon.find().sort({ createdAt: -1 });
     return sendSuccess(res, coupons);
@@ -14,7 +15,7 @@ router.get('/admin', verifyToken, verifyRole(['admin']), async (req, res) => {
   }
 });
 
-router.get('/', async (req, res) => {
+router.get('/', cacheMiddleware(300), async (req, res) => {
   try {
     const { all, admin } = req.query;
     if (all === 'true' || admin === 'true') {
@@ -64,6 +65,7 @@ router.post('/', verifyToken, verifyRole(['admin']), async (req, res) => {
 
     const coupon = new Coupon({ code: code.toUpperCase(), type, value, minOrderValue, maxDiscount, maxUsage, startDate, expiredAt });
     await coupon.save();
+    clearCache('/api/coupons');
 
     return sendSuccess(res, coupon, 'Coupon created', 201);
   } catch (error) {
@@ -78,7 +80,7 @@ router.patch('/:id', verifyToken, verifyRole(['admin']), async (req, res) => {
     if (!coupon) {
       return sendError(res, 'Coupon not found', 404);
     }
-
+    clearCache('/api/coupons');
     return sendSuccess(res, coupon, 'Coupon updated');
   } catch (error) {
     return sendError(res, 'Failed to update coupon', 500);
@@ -92,7 +94,7 @@ router.delete('/:id', verifyToken, verifyRole(['admin']), async (req, res) => {
     if (!coupon) {
       return sendError(res, 'Coupon not found', 404);
     }
-
+    clearCache('/api/coupons');
     return sendSuccess(res, null, 'Coupon deleted');
   } catch (error) {
     return sendError(res, 'Failed to delete coupon', 500);

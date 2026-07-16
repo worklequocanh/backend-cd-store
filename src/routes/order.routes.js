@@ -10,6 +10,7 @@ import { verifyToken } from '../middlewares/auth.js';
 import { sendEmail } from '../utils/email.js';
 import { getOrderStatusEmail, getPaymentSuccessEmail } from '../utils/emailTemplates.js';
 import { getSePay } from '../config/sepay.js';
+import { generateInvoicePdf } from '../services/invoice.service.js';
 
 const router = express.Router();
 
@@ -158,6 +159,25 @@ router.get('/config/payment', verifyToken, (req, res) => {
     accountNo: process.env.ACCOUNT_NO,
     accountName: process.env.ACCOUNT_NAME,
   });
+});
+
+router.get('/:id/invoice/pdf', verifyToken, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate('items.productId');
+
+    if (!order || (order.userId.toString() !== req.user.id && req.user.role !== 'admin')) {
+      return sendError(res, 'Order not found or access denied', 404);
+    }
+
+    const filename = `Invoice-${order.invoiceNumber || order._id.toString().slice(-6).toUpperCase()}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    return generateInvoicePdf(order, res);
+  } catch (error) {
+    console.error('Failed to generate PDF invoice:', error);
+    return sendError(res, 'Failed to generate PDF invoice', 500);
+  }
 });
 
 router.get('/:id', verifyToken, async (req, res) => {

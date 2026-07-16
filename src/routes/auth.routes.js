@@ -5,6 +5,7 @@ import { sendSuccess, sendError } from '../utils/response.js';
 import { sendEmail } from '../utils/email.js';
 import { getWelcomeEmail, getLoginAlertEmail, getOtpEmail } from '../utils/emailTemplates.js';
 import { getJwtConfig } from '../config/jwt.js';
+import { verifyGoogleToken } from '../services/googleAuth.service.js';
 
 const router = express.Router();
 
@@ -80,6 +81,82 @@ router.post('/login', async (req, res) => {
   } catch (error) {
     console.error(error);
     return sendError(res, 'Internal server error', 500);
+  }
+});
+
+router.post('/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return sendError(res, 'Google credential token is required', 400);
+    }
+
+    const googleUser = await verifyGoogleToken(credential);
+    if (!googleUser || !googleUser.email) {
+      return sendError(res, 'Xác thực Google thất bại hoặc không hợp lệ', 401);
+    }
+
+    let user = await User.findOne({ email: googleUser.email });
+    let isNewUser = false;
+
+    if (!user) {
+      const randomPass = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8) + 'G!';
+      user = new User({
+        name: googleUser.name || googleUser.email.split('@')[0],
+        email: googleUser.email,
+        passwordHash: randomPass,
+        avatar: googleUser.picture || '',
+        role: 'user',
+        status: 'active'
+      });
+      await user.save();
+      isNewUser = true;
+
+      sendEmail({
+        to: user.email,
+        subject: 'Welcome to CD Store via Google! 🎉',
+        html: getWelcomeEmail(user.name)
+      });
+    } else {
+      if (googleUser.picture && (!user.avatar || user.avatar !== googleUser.picture)) {
+        user.avatar = googleUser.picture;
+        await user.save();
+      }
+    }
+
+    if (user.status === 'inactive') {
+      return sendError(res, 'Tài khoản của bạn đã bị khóa hoặc ngừng hoạt động', 403);
+    }
+
+    const jwtCfg = getJwtConfig();
+    const token = jwt.sign({ id: user._id, role: user.role }, jwtCfg.secret, { expiresIn: jwtCfg.expiresIn });
+    const refreshToken = jwt.sign({ id: user._id }, jwtCfg.refreshSecret, { expiresIn: jwtCfg.refreshExpiresIn });
+
+    res.cookie('refreshToken', refreshToken, { httpOnly: true, maxAge: jwtCfg.cookieMaxAge });
+
+    if (!isNewUser) {
+      const loginTime = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+      sendEmail({
+        to: user.email,
+        subject: 'New Google Login Alert - CD Store',
+        html: getLoginAlertEmail(user.name, loginTime)
+      });
+    }
+
+    return sendSuccess(res, {
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar
+      },
+      token,
+      isNewUser
+    }, 'Đăng nhập Google thành công!');
+  } catch (error) {
+    console.error('Google login error:', error);
+    return sendError(res, 'Internal server error during Google login', 500);
   }
 });
 
