@@ -119,8 +119,8 @@ router.get('/:id', verifyToken, async (req, res) => {
       return sendError(res, 'Order not found or access denied', 404);
     }
 
-    // Proactively check status if still pending (or handle via SePay return)
-    if (order.paymentMethod === 'qr' && order.paymentStatus === 'pending' && order.payosOrderCode) {
+    // Proactively check status if still pending
+    if (order.paymentMethod === 'qr' && order.paymentStatus === 'pending') {
       try {
         const sepay = getSePay();
         if (sepay.order && typeof sepay.order.retrieve === 'function') {
@@ -350,19 +350,19 @@ router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res)
       (invoiceNumber && !body.error && !body.error_message && body.status !== 'FAILED' && body.status !== 'CANCELLED');
 
     if (invoiceNumber && isSuccess) {
-      let order = await Order.findOne({ 
-        $or: [
-          { orderNumber: invoiceNumber },
-          { payosOrderCode: invoiceNumber }
-        ]
-      });
+      const orConditions = [{ orderNumber: invoiceNumber }];
+      if (!isNaN(Number(invoiceNumber))) {
+        orConditions.push({ payosOrderCode: Number(invoiceNumber) });
+      }
+
+      let order = await Order.findOne({ $or: orConditions });
 
       if (!order && typeof invoiceNumber === 'string') {
         const match = invoiceNumber.match(/(ORD-\d+-[a-zA-Z0-9]+|DH\d+)/i);
         if (match) {
-          order = await Order.findOne({ orderNumber: { $regex: match[0], $options: 'i' } });
+          order = await Order.findOne({ orderNumber: { $regex: `^${match[0]}$`, $options: 'i' } });
         } else {
-          order = await Order.findOne({ orderNumber: { $regex: invoiceNumber, $options: 'i' } });
+          order = await Order.findOne({ orderNumber: { $regex: `^${invoiceNumber}$`, $options: 'i' } });
         }
       }
 
