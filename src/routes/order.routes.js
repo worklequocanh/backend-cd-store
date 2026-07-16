@@ -276,8 +276,8 @@ router.post(['/:id/confirm-payment', '/:id/verify-payment', '/:id/verify-sepay-r
       return sendError(res, 'Order not found or access denied', 404);
     }
 
-    // If verified automatically via SePay checkout redirect or mock/admin, confirm status
-    if (order.paymentStatus === 'pending' && (req.path.includes('verify-sepay-redirect') || req.user.role === 'admin')) {
+    // Only allow admin or real IPN webhook to mark order completed
+    if (order.paymentStatus === 'pending' && req.user.role === 'admin') {
       order.paymentStatus = 'completed';
       order.orderStatus = 'confirmed';
       await order.save();
