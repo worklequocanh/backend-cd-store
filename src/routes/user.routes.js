@@ -23,6 +23,94 @@ router.get('/', verifyToken, verifyRole(['admin']), async (req, res) => {
   }
 });
 
+router.get('/profile', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-passwordHash');
+    if (!user) {
+      return sendError(res, 'User not found', 404);
+    }
+    return sendSuccess(res, user);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch profile', 500);
+  }
+});
+
+router.put(['/profile', '/me'], verifyToken, async (req, res) => {
+  try {
+    const { name, phone, address, avatar } = req.body;
+    const user = await User.findByIdAndUpdate(req.user.id, { name, phone, address, avatar }, { new: true }).select('-passwordHash');
+
+    if (!user) {
+      return sendError(res, 'User not found', 404);
+    }
+
+    sendEmail({
+      to: user.email,
+      subject: 'Security Alert: Your Profile Was Updated',
+      html: getProfileUpdateEmail(user.name)
+    });
+
+    return sendSuccess(res, user, 'Profile updated successfully');
+  } catch (error) {
+    return sendError(res, 'Failed to update profile', 500);
+  }
+});
+
+router.patch(['/profile', '/me'], verifyToken, async (req, res) => {
+  try {
+    const { name, phone, address, avatar } = req.body;
+    const user = await User.findByIdAndUpdate(req.user.id, { name, phone, address, avatar }, { new: true }).select('-passwordHash');
+
+    if (!user) {
+      return sendError(res, 'User not found', 404);
+    }
+
+    sendEmail({
+      to: user.email,
+      subject: 'Security Alert: Your Profile Was Updated',
+      html: getProfileUpdateEmail(user.name)
+    });
+
+    return sendSuccess(res, user, 'Profile updated successfully');
+  } catch (error) {
+    return sendError(res, 'Failed to update profile', 500);
+  }
+});
+
+router.post('/change-password', verifyToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return sendError(res, 'Current and new password are required', 400);
+    }
+    if (newPassword.length < 6) {
+      return sendError(res, 'New password must be at least 6 characters long', 400);
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return sendError(res, 'User not found', 404);
+    }
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) {
+      return sendError(res, 'Current password is incorrect', 400);
+    }
+
+    user.passwordHash = newPassword;
+    await user.save();
+
+    return sendSuccess(res, null, 'Password changed successfully');
+  } catch (error) {
+    return sendError(res, 'Failed to change password', 500);
+  }
+});
+
+router.put('/change-password', verifyToken, async (req, res) => {
+  req.url = '/change-password';
+  return router.handle(req, res);
+});
+
 router.get('/:id', verifyToken, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-passwordHash');

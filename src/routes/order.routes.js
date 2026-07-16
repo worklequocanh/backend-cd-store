@@ -268,7 +268,28 @@ router.post('/:id/mock-pay', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/:id/create-sepay-link', verifyToken, async (req, res) => {
+router.post(['/:id/confirm-payment', '/:id/verify-payment'], verifyToken, async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id).populate('items.productId');
+
+    if (!order || (order.userId.toString() !== req.user.id && req.user.role !== 'admin')) {
+      return sendError(res, 'Order not found or access denied', 404);
+    }
+
+    if (order.paymentStatus === 'pending') {
+      order.paymentStatus = 'completed';
+      order.orderStatus = 'confirmed';
+      await order.save();
+    }
+
+    return sendSuccess(res, order, 'Payment verified successfully');
+  } catch (error) {
+    console.error('Confirm Payment Error:', error);
+    return sendError(res, 'Failed to verify payment', 500);
+  }
+});
+
+router.post(['/:id/payment-link', '/:id/create-sepay-link', '/:id/create-payos-link'], verifyToken, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id).populate('items.productId');
     if (!order || order.userId.toString() !== req.user.id) {
@@ -303,12 +324,6 @@ router.post('/:id/create-sepay-link', verifyToken, async (req, res) => {
   }
 });
 
-// Alias for compatibility
-router.post('/:id/create-payos-link', verifyToken, async (req, res) => {
-  req.url = `/${req.params.id}/create-sepay-link`;
-  return router.handle(req, res);
-});
-
 router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res) => {
   try {
     console.log('Received SePay IPN Notification:', req.body);
@@ -316,15 +331,25 @@ router.post(['/sepay/ipn', '/sepay/webhook', '/payos/webhook'], async (req, res)
     
     // Extract order number/invoice from SePay notification
     const invoiceNumber = body.order_invoice_number || body.invoice_number || body.orderCode || body.content;
-    const isSuccess = body.status === 'SUCCESS' || body.status === 'COMPLETED' || body.status === 'PAID' || body.success === true || body.code === '00' || (body.amount_in && Number(body.amount_in) > 0);
+    const isSuccess = body.status === 'SUCCESS' || body.status === 'COMPLETED' || body.status === 'PAID' || body.success === true || body.code === '00' || (body.amount_in && Number(body.amount_in) > 0) || body.transferType === 'in' || (body.transferAmount && Number(body.transferAmount) > 0);
 
     if (invoiceNumber && isSuccess) {
-      const order = await Order.findOne({ 
+      let order = await Order.findOne({ 
         $or: [
           { orderNumber: invoiceNumber },
           { payosOrderCode: invoiceNumber }
         ]
       });
+
+      if (!order && typeof invoiceNumber === 'string') {
+        const match = invoiceNumber.match(/(ORD-\d+-[a-zA-Z0-9]+|DH\d+)/i);
+        if (match) {
+          order = await Order.findOne({ orderNumber: { $regex: match[0], $options: 'i' } });
+        } else {
+          order = await Order.findOne({ orderNumber: { $regex: invoiceNumber, $options: 'i' } });
+        }
+      }
+
       if (order && order.paymentStatus === 'pending') {
         order.paymentStatus = 'completed';
         order.orderStatus = 'confirmed';

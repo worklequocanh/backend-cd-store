@@ -47,7 +47,7 @@ const calculateTotals = async (cart) => {
   cart.total = Math.max(0, subtotal - (cart.discountAmount || 0));
 };
 
-router.post('/apply-coupon', verifyToken, async (req, res) => {
+router.post(['/coupon', '/apply-coupon'], verifyToken, async (req, res) => {
   try {
     const { code } = req.body;
     if (!code) return sendError(res, 'Coupon code is required', 400);
@@ -80,6 +80,11 @@ router.post('/apply-coupon', verifyToken, async (req, res) => {
   } catch (error) {
     return sendError(res, 'Failed to apply coupon', 500);
   }
+});
+
+router.put('/coupon', verifyToken, async (req, res) => {
+  req.url = '/coupon';
+  return router.handle(req, res);
 });
 
 router.delete('/coupon', verifyToken, async (req, res) => {

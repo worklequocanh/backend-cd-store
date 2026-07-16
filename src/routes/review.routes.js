@@ -25,6 +25,24 @@ router.patch('/admin/:id/status', verifyToken, verifyRole(['admin']), async (req
   }
 });
 
+router.get('/', async (req, res) => {
+  try {
+    const { productId, all } = req.query;
+    if (productId) {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 10;
+      const skip = (page - 1) * limit;
+      const reviews = await Review.find({ productId, isApproved: true }).populate('userId', 'name avatar').skip(skip).limit(limit);
+      return sendSuccess(res, reviews);
+    }
+    // Default or all
+    const reviews = await Review.find(all ? {} : { isApproved: true }).populate('userId', 'name email').populate('productId', 'name slug').sort({ createdAt: -1 });
+    return sendSuccess(res, reviews);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch reviews', 500);
+  }
+});
+
 router.post('/', verifyToken, async (req, res) => {
   try {
     const { productId, rating, comment, images } = req.body;
