@@ -19,6 +19,7 @@ import adminRoutes from './src/routes/admin.routes.js';
 import adminAuthRoutes from './src/routes/adminAuth.routes.js';
 import uploadRoutes from './src/routes/upload.routes.js';
 import contactRoutes from './src/routes/contact.routes.js';
+import newsletterRoutes from './src/routes/newsletter.routes.js';
 
 dotenv.config();
 
@@ -56,6 +57,7 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/newsletter', newsletterRoutes);
 
 // 404 handler
 app.use((_req, res) => res.status(404).json({ success: false, message: 'Route not found' }));
