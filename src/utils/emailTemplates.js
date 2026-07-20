@@ -129,7 +129,7 @@ export const getOrderStatusEmail = (order, user) => {
         </tr>
         <tr>
           <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; color: #64748b;">Payment Method</td>
-          <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-weight: bold; text-align: right;">${order.paymentMethod === 'qr' ? 'PayOS' : 'COD'}</td>
+          <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-weight: bold; text-align: right;">${order.paymentMethod === 'qr' ? 'Chuyển khoản SePay QR' : 'Thanh toán COD'}</td>
         </tr>
         <tr>
           <td style="padding: 8px 0; border-bottom: 1px solid #e2e8f0; color: #64748b;">Payment Status</td>
