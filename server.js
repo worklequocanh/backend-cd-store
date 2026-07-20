@@ -20,6 +20,7 @@ import adminAuthRoutes from './src/routes/adminAuth.routes.js';
 import uploadRoutes from './src/routes/upload.routes.js';
 import contactRoutes from './src/routes/contact.routes.js';
 import newsletterRoutes from './src/routes/newsletter.routes.js';
+import campaignRoutes from './src/routes/campaign.routes.js';
 
 dotenv.config();
 
@@ -55,6 +56,7 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/campaigns', campaignRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/newsletter', newsletterRoutes);
