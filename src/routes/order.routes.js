@@ -10,8 +10,9 @@ import { verifyToken } from '../middlewares/auth.js';
 import { sendEmail } from '../utils/email.js';
 import { getOrderStatusEmail, getPaymentSuccessEmail } from '../utils/emailTemplates.js';
 import { getSePay } from '../config/sepay.js';
-import { generateInvoicePdf } from '../services/invoice.service.js';
+import { generateInvoicePdf, generateInvoicePdfBuffer } from '../services/invoice.service.js';
 import { validateCoupon } from '../services/coupon.service.js';
+import StockLog from '../models/StockLog.js';
 
 const router = express.Router();
 
@@ -21,16 +22,29 @@ const handleOrderCompleted = async (order) => {
   }
 
   try {
-    // Trừ tồn kho và tăng số lượng đã bán 1 lần duy nhất (idempotent)
+    // Trừ tồn kho và tăng số lượng đã bán 1 lần duy nhất (idempotent) + ghi nhật ký StockLog
     if (!order.stockDeducted && order.items && order.items.length > 0) {
       for (const item of order.items) {
-        if (item.productId) {
-          await Product.findByIdAndUpdate(item.productId, {
-            $inc: {
-              stock: -item.quantity,
-              sold: item.quantity
-            }
-          });
+        const prodId = item.productId?._id || item.productId;
+        if (prodId) {
+          const oldProduct = await Product.findById(prodId);
+          if (oldProduct) {
+            const prev = oldProduct.stock || 0;
+            const updated = prev - item.quantity;
+            oldProduct.stock = updated;
+            oldProduct.sold = (oldProduct.sold || 0) + item.quantity;
+            await oldProduct.save();
+
+            await StockLog.create({
+              productId: prodId,
+              type: 'order_deduction',
+              quantityChange: -item.quantity,
+              previousStock: prev,
+              newStock: updated,
+              note: `Đơn hàng #${order.orderNumber || order._id.toString().slice(-6).toUpperCase()}`,
+              performedBy: order.userId || null
+            });
+          }
         }
       }
       order.stockDeducted = true;
@@ -41,14 +55,31 @@ const handleOrderCompleted = async (order) => {
     await order.save();
     console.log(`Order #${order.orderNumber} confirmed & stock deducted.`);
 
-    // Gửi email xác nhận thanh toán
+    // Gửi email xác nhận thanh toán kèm đính kèm PDF Invoice
     try {
       const user = await User.findById(order.userId);
       if (user && user.email) {
+        let pdfBuffer = null;
+        try {
+          if (!order.items[0]?.productId?.name && typeof order.populate === 'function') {
+            await order.populate('items.productId');
+          }
+          pdfBuffer = await generateInvoicePdfBuffer(order);
+        } catch (pdfErr) {
+          console.error('Failed to generate PDF buffer for email:', pdfErr.message);
+        }
+
+        const attachments = pdfBuffer ? [{
+          filename: `Invoice-${order.invoiceNumber || order.orderNumber || order._id.toString().slice(-6).toUpperCase()}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf'
+        }] : [];
+
         sendEmail({
           to: user.email,
-          subject: `🎉 Payment Receipt - Order #${order.orderNumber}`,
-          html: getPaymentSuccessEmail(order, user)
+          subject: `🎉 Payment Receipt & Invoice - Order #${order.orderNumber || order._id.toString().slice(-6).toUpperCase()}`,
+          html: getPaymentSuccessEmail(order, user),
+          attachments
         });
       }
     } catch (emailErr) {
@@ -281,6 +312,34 @@ router.post('/:id/cancel', verifyToken, async (req, res) => {
 
     if (['shipped', 'delivered'].includes(order.orderStatus)) {
       return sendError(res, 'Cannot cancel this order', 400);
+    }
+
+    // Hoàn kho nếu đơn đã bị trừ tồn kho trước đó
+    if (order.stockDeducted && order.items && order.items.length > 0) {
+      for (const item of order.items) {
+        const prodId = item.productId?._id || item.productId;
+        if (prodId) {
+          const oldProduct = await Product.findById(prodId);
+          if (oldProduct) {
+            const prev = oldProduct.stock || 0;
+            const updated = prev + item.quantity;
+            oldProduct.stock = updated;
+            oldProduct.sold = Math.max(0, (oldProduct.sold || 0) - item.quantity);
+            await oldProduct.save();
+
+            await StockLog.create({
+              productId: prodId,
+              type: 'cancellation_return',
+              quantityChange: item.quantity,
+              previousStock: prev,
+              newStock: updated,
+              note: `Hoàn kho do hủy đơn #${order.orderNumber || order._id.toString().slice(-6).toUpperCase()} (Lý do: ${reason || 'N/A'})`,
+              performedBy: req.user.id
+            });
+          }
+        }
+      }
+      order.stockDeducted = false;
     }
 
     order.orderStatus = 'cancelled';

@@ -4,6 +4,8 @@ import User from '../models/User.js';
 import Product from '../models/Product.js';
 import Review from '../models/Review.js';
 import Contact from '../models/Contact.js';
+import Cart from '../models/Cart.js';
+import StockLog from '../models/StockLog.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken, verifyRole } from '../middlewares/auth.js';
 import { sendEmail } from '../utils/email.js';
@@ -61,6 +63,263 @@ router.get('/dashboard', verifyToken, verifyRole(['admin']), async (req, res) =>
   } catch (error) {
     console.error(error);
     return sendError(res, 'Failed to fetch dashboard data', 500);
+  }
+});
+
+// Analytics Charts & Reports
+router.get('/analytics/charts', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // Revenue over last 7 days
+    const dailyRevenueAgg = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: sevenDaysAgo },
+          orderStatus: { $ne: 'cancelled' }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          revenue: { $sum: '$totalAmount' },
+          ordersCount: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Top 5 selling products
+    const topProducts = await Product.find({ isActive: true })
+      .sort({ sold: -1 })
+      .limit(5)
+      .select('name sold stock price images');
+
+    // Conversion rate & completed breakdown
+    const totalOrders = await Order.countDocuments();
+    const completedOrders = await Order.countDocuments({ orderStatus: 'delivered' });
+    const conversionRate = totalOrders > 0 ? ((completedOrders / totalOrders) * 100).toFixed(1) : 0;
+
+    return sendSuccess(res, {
+      dailyRevenue: dailyRevenueAgg,
+      topProducts,
+      conversionRate: Number(conversionRate),
+      totalOrders,
+      completedOrders
+    });
+  } catch (error) {
+    console.error('Analytics charts error:', error);
+    return sendError(res, 'Failed to fetch analytics charts data', 500);
+  }
+});
+
+// Inventory Alerts (Low Stock <= 10)
+router.get('/inventory/alerts', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const lowStockProducts = await Product.find({ stock: { $lte: 10 }, isActive: true })
+      .populate('categoryId', 'name')
+      .sort({ stock: 1 });
+
+    return sendSuccess(res, { lowStockProducts, count: lowStockProducts.length });
+  } catch (error) {
+    return sendError(res, 'Failed to fetch low stock alerts', 500);
+  }
+});
+
+// Stock Ledger Logs
+router.get('/inventory/logs', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 15;
+    const skip = (page - 1) * limit;
+
+    const logs = await StockLog.find()
+      .populate('productId', 'name price images')
+      .populate('performedBy', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await StockLog.countDocuments();
+    const pages = Math.ceil(total / limit);
+
+    return sendSuccess(res, { logs, page, pages, total });
+  } catch (error) {
+    return sendError(res, 'Failed to fetch inventory logs', 500);
+  }
+});
+
+// Adjust or Import Stock manually
+router.post('/inventory/adjust', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { productId, quantityChange, type, note } = req.body;
+    if (!productId || typeof quantityChange !== 'number' || !type) {
+      return sendError(res, 'Missing required fields (productId, quantityChange, type)', 400);
+    }
+
+    const product = await Product.findById(productId);
+    if (!product) {
+      return sendError(res, 'Product not found', 404);
+    }
+
+    const prevStock = product.stock || 0;
+    const newStock = prevStock + quantityChange;
+    if (newStock < 0) {
+      return sendError(res, `Insufficient stock (current: ${prevStock})`, 400);
+    }
+
+    product.stock = newStock;
+    await product.save();
+
+    const log = await StockLog.create({
+      productId,
+      type,
+      quantityChange,
+      previousStock: prevStock,
+      newStock,
+      note: note || 'Điều chỉnh từ Admin Dashboard',
+      performedBy: req.user.id
+    });
+
+    return sendSuccess(res, { product, log }, 'Stock adjusted successfully');
+  } catch (error) {
+    return sendError(res, 'Failed to adjust stock', 500);
+  }
+});
+
+// Abandoned Carts Marketing
+router.get('/marketing/abandoned-carts', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const carts = await Cart.find({ 'items.0': { $exists: true } })
+      .populate('userId', 'name email phone')
+      .populate('items.productId', 'name price images')
+      .sort({ updatedAt: -1 })
+      .limit(20);
+
+    const validCarts = carts.filter(c => c.userId && c.userId.email);
+    return sendSuccess(res, { carts: validCarts, count: validCarts.length });
+  } catch (error) {
+    return sendError(res, 'Failed to fetch abandoned carts', 500);
+  }
+});
+
+router.post('/marketing/abandoned-carts/remind', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const { cartId, couponCode } = req.body;
+    const cart = await Cart.findById(cartId).populate('userId', 'name email').populate('items.productId', 'name price');
+    if (!cart || !cart.userId || !cart.userId.email) {
+      return sendError(res, 'Cart or user email not found', 404);
+    }
+
+    const itemsHtml = cart.items
+      .filter(item => item.productId)
+      .map(item => `<li><strong>${item.productId.name}</strong> x ${item.quantity} - ${Number(item.productId.price).toLocaleString()} VND</li>`)
+      .join('');
+
+    const discountNote = couponCode ? `<p style="background: #fef3c7; color: #b45309; padding: 12px; border-radius: 8px; font-weight: bold;">Mã giảm giá đặc biệt cho bạn: <span style="font-size: 18px;">${couponCode}</span></p>` : '';
+
+    const emailResult = await sendEmail({
+      to: cart.userId.email,
+      subject: '🛒 Đừng bỏ lỡ giỏ hàng của bạn tại CD Store!',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b;">
+          <h2 style="color: #4f46e5;">Chào ${cart.userId.name || 'bạn'},</h2>
+          <p>Chúng tôi nhận thấy bạn vẫn còn những sản phẩm tuyệt vời đang chờ trong giỏ hàng:</p>
+          <ul>${itemsHtml}</ul>
+          ${discountNote}
+          <p style="margin-top: 24px;">
+            <a href="${process.env.FRONTEND_URL || 'https://frontend-cd-store.vercel.app'}/cart" style="background: #4f46e5; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Hoàn Tất Đặt Hàng Ngay</a>
+          </p>
+          <p style="color: #64748b; font-size: 12px; margin-top: 32px;">Trân trọng,<br>Đội ngũ CD Store</p>
+        </div>
+      `
+    });
+
+    if (emailResult.success) {
+      return sendSuccess(res, { success: true }, `Reminder email sent to ${cart.userId.email}`);
+    } else {
+      return sendError(res, `Failed to send email: ${emailResult.error}`, 500);
+    }
+  } catch (error) {
+    return sendError(res, 'Failed to send abandoned cart reminder', 500);
+  }
+});
+
+// AdminDashboard Recharts endpoints
+router.get('/analytics/revenue', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const revenueAgg = await Order.aggregate([
+      { $match: { createdAt: { $gte: thirtyDaysAgo }, orderStatus: { $ne: 'cancelled' } } },
+      { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          revenue: { $sum: '$totalAmount' },
+          orders: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+    const data = revenueAgg.map(item => ({ date: item._id, revenue: item.revenue, orders: item.orders }));
+    return sendSuccess(res, data);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch revenue analytics', 500);
+  }
+});
+
+router.get('/analytics/products', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const products = await Product.find({ isActive: true }).sort({ sold: -1 }).limit(6).select('name sold price');
+    const data = products.map(p => ({
+      name: p.name ? (p.name.length > 20 ? p.name.substring(0, 20) + '...' : p.name) : 'Sản phẩm',
+      sold: p.sold || 0,
+      revenue: (p.sold || 0) * (p.price || 0)
+    }));
+    return sendSuccess(res, data);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch products analytics', 500);
+  }
+});
+
+router.get('/analytics/categories', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const catAgg = await Product.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: '$categoryId', count: { $sum: 1 }, totalSold: { $sum: '$sold' } } },
+      { $lookup: { from: 'categories', localField: '_id', foreignField: '_id', as: 'category' } },
+      { $unwind: { path: '$category', preserveNullAndEmptyArrays: true } }
+    ]);
+    const data = catAgg.map(item => ({
+      name: item.category?.name || 'Khác',
+      value: item.count || 0
+    }));
+    return sendSuccess(res, data);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch categories analytics', 500);
+  }
+});
+
+router.get('/analytics/status', verifyToken, verifyRole(['admin']), async (req, res) => {
+  try {
+    const statAgg = await Order.aggregate([
+      { $group: { _id: '$orderStatus', count: { $sum: 1 } } }
+    ]);
+    const statusMap = {
+      pending: { name: 'Đang chờ', color: '#f59e0b' },
+      confirmed: { name: 'Đã xác nhận', color: '#3b82f6' },
+      shipping: { name: 'Đang giao', color: '#8b5cf6' },
+      delivered: { name: 'Hoàn thành', color: '#10b981' },
+      cancelled: { name: 'Đã hủy', color: '#ef4444' }
+    };
+    const data = statAgg.map(item => ({
+      name: statusMap[item._id]?.name || item._id,
+      count: item.count,
+      color: statusMap[item._id]?.color || '#64748b'
+    }));
+    return sendSuccess(res, data);
+  } catch (error) {
+    return sendError(res, 'Failed to fetch status analytics', 500);
   }
 });
 

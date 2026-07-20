@@ -21,6 +21,7 @@ import uploadRoutes from './src/routes/upload.routes.js';
 import contactRoutes from './src/routes/contact.routes.js';
 import newsletterRoutes from './src/routes/newsletter.routes.js';
 import campaignRoutes from './src/routes/campaign.routes.js';
+import seoRoutes from './src/routes/seo.routes.js';
 
 dotenv.config();
 
@@ -60,6 +61,7 @@ app.use('/api/admin/campaigns', campaignRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/newsletter', newsletterRoutes);
+app.use(['/api/seo', '/'], seoRoutes);
 
 // 404 handler
 app.use((_req, res) => res.status(404).json({ success: false, message: 'Route not found' }));

@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 
-export const sendEmail = async ({ to, subject, html }) => {
+export const sendEmail = async ({ to, subject, html, attachments }) => {
   try {
     // We only create transporter if environment variables are provided
     if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
@@ -23,6 +23,7 @@ export const sendEmail = async ({ to, subject, html }) => {
       to,
       subject,
       html,
+      attachments: attachments || [],
     };
 
     await transporter.sendMail(mailOptions);

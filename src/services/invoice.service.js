@@ -15,15 +15,11 @@ function removeDiacritics(str) {
 }
 
 /**
- * Generate a professional PDF invoice for an order and stream it to the Express response
+ * Core function that builds the PDF invoice content on a PDFDocument instance
+ * @param {Object} doc - PDFKit document object
  * @param {Object} order - Mongoose order document with populated items
- * @param {Object} res - Express response object
  */
-export const generateInvoicePdf = (order, res) => {
-  const doc = new PDFDocument({ margin: 50, size: 'A4' });
-
-  // Pipe PDF stream to HTTP response
-  doc.pipe(res);
+function buildInvoiceDoc(doc, order) {
 
   // 1. Header Section
   doc
@@ -193,8 +189,39 @@ export const generateInvoicePdf = (order, res) => {
     .font('Helvetica-Oblique')
     .fontSize(9)
     .text('Thank you for shopping at CD Store Chuyen De Backend! We hope you enjoy your music.', 50, footerY + 15, { align: 'center', width: 495 });
+}
 
+/**
+ * Generate a professional PDF invoice for an order and stream it to the Express response
+ * @param {Object} order - Mongoose order document with populated items
+ * @param {Object} res - Express response object
+ */
+export const generateInvoicePdf = (order, res) => {
+  const doc = new PDFDocument({ margin: 50, size: 'A4' });
+  doc.pipe(res);
+  buildInvoiceDoc(doc, order);
   doc.end();
+};
+
+/**
+ * Generate a professional PDF invoice for an order and return a Promise<Buffer> (useful for email attachments)
+ * @param {Object} order - Mongoose order document with populated items
+ * @returns {Promise<Buffer>}
+ */
+export const generateInvoicePdfBuffer = (order) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      const buffers = [];
+      doc.on('data', (chunk) => buffers.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+      doc.on('error', (err) => reject(err));
+      buildInvoiceDoc(doc, order);
+      doc.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
 };
 
 export default generateInvoicePdf;
