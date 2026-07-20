@@ -11,6 +11,7 @@ import { sendEmail } from '../utils/email.js';
 import { getOrderStatusEmail, getPaymentSuccessEmail } from '../utils/emailTemplates.js';
 import { getSePay } from '../config/sepay.js';
 import { generateInvoicePdf } from '../services/invoice.service.js';
+import { validateCoupon } from '../services/coupon.service.js';
 
 const router = express.Router();
 
@@ -89,7 +90,24 @@ router.post('/', verifyToken, async (req, res) => {
     });
 
     const shippingFee = subtotal > 500000 ? 0 : 250;
-    const discountAmount = cart.discountAmount || 0;
+    let discountAmount = cart.discountAmount || 0;
+
+    // Final verification of coupon before placing order
+    if (cart.couponCode) {
+      const couponResult = await validateCoupon({
+        code: cart.couponCode,
+        userId: req.user.id,
+        userEmail: req.user.email,
+        orderValue: subtotal,
+        checkUserLimits: true
+      });
+
+      if (!couponResult.success) {
+        return sendError(res, `Không thể áp dụng mã ${cart.couponCode}: ${couponResult.message}`, 400);
+      }
+      discountAmount = couponResult.discountAmount || discountAmount;
+    }
+
     const total = Math.max(0, subtotal + shippingFee - discountAmount);
 
     const order = new Order({
@@ -110,7 +128,7 @@ router.post('/', verifyToken, async (req, res) => {
     if (cart.couponCode) {
       await Coupon.findOneAndUpdate(
         { code: cart.couponCode },
-        { $inc: { usedCount: 1 }, $addToSet: { usedBy: req.user.id } }
+        { $inc: { usedCount: 1 }, $push: { usedBy: req.user.id } }
       );
     }
 

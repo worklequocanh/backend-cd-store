@@ -3,6 +3,7 @@ import Cart from '../models/Cart.js';
 import { sendSuccess, sendError } from '../utils/response.js';
 import { verifyToken } from '../middlewares/auth.js';
 import Coupon from '../models/Coupon.js';
+import { validateCoupon } from '../services/coupon.service.js';
 
 const router = express.Router();
 import mongoose from 'mongoose';
@@ -30,15 +31,18 @@ const calculateTotals = async (cart) => {
   cart.subtotal = subtotal;
 
   if (cart.couponCode) {
-    const CouponModel = mongoose.model('Coupon');
-    const coupon = await CouponModel.findOne({ code: cart.couponCode, isActive: true, expiredAt: { $gt: new Date() } });
-    if (!coupon || (coupon.minOrderValue && subtotal < coupon.minOrderValue)) {
+    const result = await validateCoupon({
+      code: cart.couponCode,
+      userId: cart.userId,
+      orderValue: subtotal,
+      checkUserLimits: true
+    });
+
+    if (!result.success) {
       cart.couponCode = null;
       cart.discountAmount = 0;
     } else {
-      const discount = coupon.type === 'percent' ? (subtotal * coupon.value) / 100 : coupon.value;
-      const finalDiscount = coupon.maxDiscount ? Math.min(discount, coupon.maxDiscount) : discount;
-      cart.discountAmount = finalDiscount;
+      cart.discountAmount = result.discountAmount || 0;
     }
   } else {
     cart.discountAmount = 0;
@@ -50,35 +54,34 @@ const calculateTotals = async (cart) => {
 router.post(['/coupon', '/apply-coupon'], verifyToken, async (req, res) => {
   try {
     const { code } = req.body;
-    if (!code) return sendError(res, 'Coupon code is required', 400);
+    if (!code) return sendError(res, 'Vui lòng nhập mã giảm giá', 400);
 
     const cart = await Cart.findOne({ userId: req.user.id }).populate('items.productId');
     if (!cart || cart.items.length === 0) {
-      return sendError(res, 'Your cart is empty', 400);
+      return sendError(res, 'Giỏ hàng của bạn đang trống', 400);
     }
 
-    const CouponModel = mongoose.model('Coupon');
-    const coupon = await CouponModel.findOne({ code: code.toUpperCase(), isActive: true, expiredAt: { $gt: new Date() } });
+    const result = await validateCoupon({
+      code,
+      userId: req.user.id,
+      userEmail: req.user.email,
+      orderValue: cart.subtotal,
+      checkUserLimits: true
+    });
 
-    if (!coupon) {
-      return sendError(res, 'Invalid or expired coupon code', 400);
+    if (!result.success) {
+      return sendError(res, result.message, 400, { errorCode: result.code });
     }
 
-    if (coupon.minOrderValue && cart.subtotal < coupon.minOrderValue) {
-      return sendError(res, `Minimum order value for this coupon is $${coupon.minOrderValue}`, 400);
-    }
-
-    if (coupon.maxUsage && coupon.usedCount >= coupon.maxUsage) {
-      return sendError(res, 'Coupon usage limit has been reached', 400);
-    }
-
-    cart.couponCode = coupon.code;
-    await calculateTotals(cart);
+    cart.couponCode = result.coupon.code;
+    cart.discountAmount = result.discountAmount;
+    cart.total = Math.max(0, cart.subtotal - cart.discountAmount);
     await cart.save();
 
-    return sendSuccess(res, cart, `Coupon applied! Discount: $${cart.discountAmount}`);
+    return sendSuccess(res, cart, `Áp dụng mã thành công! Bạn được giảm $${cart.discountAmount.toFixed(2)}`);
   } catch (error) {
-    return sendError(res, 'Failed to apply coupon', 500);
+    console.error('Error applying coupon to cart:', error);
+    return sendError(res, 'Áp dụng mã ưu đãi thất bại', 500);
   }
 });
 
