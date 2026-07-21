@@ -13,6 +13,15 @@
 
 ---
 
+## 🔗 Live Demo & Source Code
+
+- **🚀 Live API (Fly.io):** [https://cd-store-backend.fly.dev/](https://cd-store-backend.fly.dev/)
+- **💻 Backend Repository:** [https://github.com/worklequocanh/backend-cd-store](https://github.com/worklequocanh/backend-cd-store)
+- **🌐 Live Frontend App:** [https://cd-store-frontend.fly.dev/](https://cd-store-frontend.fly.dev/)
+- **💻 Frontend Repository:** [https://github.com/worklequocanh/frontend-cd-store](https://github.com/worklequocanh/frontend-cd-store)
+
+---
+
 ## 🌟 Tổng Quan Dự Án (`Overview`)
 
 **CD Store Backend API** là nền tảng dịch vụ máy chủ hiệu năng cao được xây dựng dựa trên kiến trúc **Node.js (V8 Engine)**, **Express.js** và **MongoDB NoSQL**. Hệ thống không chỉ cung cấp trọn bộ API nghiệp vụ bán lẻ thương mại điện tử thông thường mà còn tích hợp **4 cụm mô-đun chuẩn Enterprise**:
